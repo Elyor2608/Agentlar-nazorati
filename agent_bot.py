@@ -100,6 +100,15 @@ def products_kb(counts):
     kb.add("✅ Tayyor", "❌ Bekor qilish")
     return kb
 
+def qty_numpad_kb(current="0"):
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("1️⃣", "2️⃣", "3️⃣")
+    kb.row("4️⃣", "5️⃣", "6️⃣")
+    kb.row("7️⃣", "8️⃣", "9️⃣")
+    kb.row("✅ Tasdiqlash", "0️⃣", "🔙")
+    kb.add("❌ Bekor qilish")
+    return kb
+
 def qty_confirm_kb():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("✅ Tasdiqlash")
@@ -403,11 +412,12 @@ def select_product(msg):
         if text == p['name'] or text == f"{p['name']} [{cnt} ta]":
             sess["step"] = "qty_sale"
             sess["selected_product"] = i
+            sess["qty_input"] = ""
             bot.send_message(uid,
                 f"📦 <b>{p['name']}</b>\n"
                 f"Narxi: {fmt(p['price'])} so'm/dona\n\n"
-                "Nechta sotdingiz? Sonini <b>yozing</b> va ✅ Tasdiqlash bosing:",
-                parse_mode="HTML", reply_markup=qty_confirm_kb())
+                "Soni: <b>0</b>",
+                parse_mode="HTML", reply_markup=qty_numpad_kb())
             return
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_sale")
@@ -418,13 +428,44 @@ def receive_qty_sale(msg):
     idx  = sess["selected_product"]
     p    = PRODUCTS[idx]
 
+    # Raqam xaritasi
+    num_map = {
+        "1️⃣":"1","2️⃣":"2","3️⃣":"3",
+        "4️⃣":"4","5️⃣":"5","6️⃣":"6",
+        "7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"
+    }
+
+    if text in num_map:
+        current = sess.get("qty_input", "")
+        current = current + num_map[text]
+        # Oldindagi nollarni olib tashlash
+        current = str(int(current)) if current else "0"
+        sess["qty_input"] = current
+        qty = int(current)
+        bot.send_message(uid,
+            f"📦 <b>{p['name']}</b>\n"
+            f"Narxi: {fmt(p['price'])} so'm/dona\n\n"
+            f"Soni: <b>{current}</b> ta\n"
+            f"Jami: <b>{fmt(qty * p['price'])} so'm</b>",
+            parse_mode="HTML", reply_markup=qty_numpad_kb())
+        return
+
+    if text == "🔙":
+        current = sess.get("qty_input", "")
+        current = current[:-1] if len(current) > 1 else "0"
+        sess["qty_input"] = current
+        qty = int(current) if current else 0
+        bot.send_message(uid,
+            f"📦 <b>{p['name']}</b>\n\n"
+            f"Soni: <b>{current}</b> ta",
+            parse_mode="HTML", reply_markup=qty_numpad_kb())
+        return
+
     if text == "✅ Tasdiqlash":
         try:
-            qty = int(sess.get("qty_input", 0))
-            if qty < 0: raise ValueError
+            qty = int(sess.get("qty_input", "0"))
         except:
-            bot.send_message(uid, "⚠️ Avval sonini yozing!", reply_markup=qty_confirm_kb())
-            return
+            qty = 0
         sess.pop("qty_input", None)
         if qty > 0:
             sess["report"]["product_counts"][str(idx)] = qty
@@ -438,19 +479,7 @@ def receive_qty_sale(msg):
             reply_markup=products_kb(sess["report"]["product_counts"]))
         return
 
-    # Son kiritildi — saqlab qo'yamiz
-    try:
-        qty = int(text)
-        if qty < 0: raise ValueError
-        sess["qty_input"] = qty
-        bot.send_message(uid,
-            f"📦 <b>{p['name']}</b>\n"
-            f"Soni: <b>{qty}</b> ta\n"
-            f"Jami: <b>{fmt(qty * p['price'])} so'm</b>\n\n"
-            "✅ Tasdiqlash tugmasini bosing:",
-            parse_mode="HTML", reply_markup=qty_confirm_kb())
-    except ValueError:
-        bot.send_message(uid, "⚠️ Faqat son kiriting!", reply_markup=qty_confirm_kb())
+    bot.send_message(uid, "⚠️ Panel tugmalaridan foydalaning!", reply_markup=qty_numpad_kb())
 
 # QADAM 5 — Vozvrat
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "vozvrat")
@@ -474,10 +503,11 @@ def select_vozvrat(msg):
         if text == p['name'] or text == f"{p['name']} [{cnt} ta]":
             sess["step"] = "qty_vozvrat"
             sess["selected_product"] = i
+            sess["qty_input"] = ""
             bot.send_message(uid,
                 f"🔄 <b>{p['name']}</b>\n\n"
-                "Nechta qaytarildi? Sonini <b>yozing</b> va ✅ Tasdiqlash bosing:",
-                parse_mode="HTML", reply_markup=qty_confirm_kb())
+                "Soni: <b>0</b>",
+                parse_mode="HTML", reply_markup=qty_numpad_kb())
             return
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_vozvrat")
@@ -488,13 +518,37 @@ def receive_qty_vozvrat(msg):
     idx  = sess["selected_product"]
     p    = PRODUCTS[idx]
 
+    num_map = {
+        "1️⃣":"1","2️⃣":"2","3️⃣":"3",
+        "4️⃣":"4","5️⃣":"5","6️⃣":"6",
+        "7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"
+    }
+
+    if text in num_map:
+        current = sess.get("qty_input", "")
+        current = current + num_map[text]
+        current = str(int(current)) if current else "0"
+        sess["qty_input"] = current
+        bot.send_message(uid,
+            f"🔄 <b>{p['name']}</b>\n\n"
+            f"Soni: <b>{current}</b> ta",
+            parse_mode="HTML", reply_markup=qty_numpad_kb())
+        return
+
+    if text == "🔙":
+        current = sess.get("qty_input", "")
+        current = current[:-1] if len(current) > 1 else "0"
+        sess["qty_input"] = current
+        bot.send_message(uid,
+            f"🔄 <b>{p['name']}</b>\n\nSoni: <b>{current}</b> ta",
+            parse_mode="HTML", reply_markup=qty_numpad_kb())
+        return
+
     if text == "✅ Tasdiqlash":
         try:
-            qty = int(sess.get("qty_input", 0))
-            if qty < 0: raise ValueError
+            qty = int(sess.get("qty_input", "0"))
         except:
-            bot.send_message(uid, "⚠️ Avval sonini yozing!", reply_markup=qty_confirm_kb())
-            return
+            qty = 0
         sess.pop("qty_input", None)
         if qty > 0:
             sess["report"]["vozvrat_counts"][str(idx)] = qty
@@ -507,17 +561,7 @@ def receive_qty_vozvrat(msg):
             reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
         return
 
-    try:
-        qty = int(text)
-        if qty < 0: raise ValueError
-        sess["qty_input"] = qty
-        bot.send_message(uid,
-            f"🔄 <b>{p['name']}</b>\n"
-            f"Soni: <b>{qty}</b> ta\n\n"
-            "✅ Tasdiqlash tugmasini bosing:",
-            parse_mode="HTML", reply_markup=qty_confirm_kb())
-    except ValueError:
-        bot.send_message(uid, "⚠️ Faqat son kiriting!", reply_markup=qty_confirm_kb())
+    bot.send_message(uid, "⚠️ Panel tugmalaridan foydalaning!", reply_markup=qty_numpad_kb())
 
 # QADAM 6 — Eskirgan
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "expired")
