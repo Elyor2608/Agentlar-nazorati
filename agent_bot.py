@@ -23,8 +23,8 @@ import json, os
 # =============================================
 # ⚙️  SOZLAMALAR
 # =============================================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"   # @BotFather dan oling
-ADMIN_ID  = 123456789               # Sizning ID: https://t.me/userinfobot
+BOT_TOKEN = "8663649354:AAGDw8eBwEVb5ck7yEbb4hX6Ya3cCZAUxMY"   # @BotFather dan oling
+ADMIN_ID  = 7642574758               # Sizning ID: https://t.me/userinfobot
 # =============================================
 
 bot       = telebot.TeleBot(BOT_TOKEN)
