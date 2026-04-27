@@ -552,22 +552,60 @@ def select_shop(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "new_shop")
 def new_shop_name(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text.strip()
+    uid = msg.from_user.id
+    sess = sessions.get(uid, {})
+    text = msg.text.strip()
+
     if text == "⬅️ Orqaga":
-        nearby = find_nearby_shops(sess["report"]["location"]["lat"], sess["report"]["location"]["lon"], 100)
-        if nearby:
-            sess["step"], sess["nearby_shops"] = "shop_select", nearby
-            kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            for s in nearby: kb.add(f"🏪 {s['name']} ({s['distance']}m)")
-            kb.add("🆕 Yangi magazin", "⬅️ Orqaga")
-            return bot.send_message(uid, "📡 100m ichidagi magazinlar:", reply_markup=kb)
-        return bot.send_message(uid, "🏪 Yangi magazin nomini yozing:", reply_markup=back_kb())
-    if len(text) < 2: return bot.send_message(uid, "⚠️ Kamida 2 belgi.")
-    lat, lon = sess["report"]["location"]["lat"], sess["report"]["location"]["lon"]
-    shop = add_shop(text, lat, lon)
-    sess["report"]["shop_name"], sess["report"]["shop_id"] = shop["name"], shop["id"]
-    sess["step"] = "photo"
-    bot.send_message(uid, f"✅ Yangi magazin: <b>{shop['name']}</b>\n\n📸 <b>2-qadam: Foto</b>", parse_mode="HTML", reply_markup=back_kb())
+        # Oldingi yoki location qadamiga qaytish
+        lat = sess.get("report", {}).get("location", {}).get("lat")
+        lon = sess.get("report", {}).get("location", {}).get("lon")
+        if lat and lon:
+            nearby = find_nearby_shops(lat, lon, 100)
+            if nearby:
+                sess["step"] = "shop_select"
+                sess["nearby_shops"] = nearby
+                kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                for s in nearby:
+                    kb.add(f"🏪 {s['name']} ({s['distance']}m)")
+                kb.add("🆕 Yangi magazin", "⬅️ Orqaga")
+                bot.send_message(uid, "📡 100m ichidagi magazinlar:", reply_markup=kb)
+            else:
+                bot.send_message(uid, "🏪 Yangi magazin nomini yozing:", reply_markup=back_kb())
+        else:
+            # Lokatsiya yo'q bo'lsa butunlay bekor qil
+            sessions.pop(uid, None)
+            user = get_user(uid)
+            kb = admin_kb() if is_admin(uid) else main_kb(user.get("role", "agent"))
+            bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=kb)
+        return
+
+    if len(text) < 2:
+        return bot.send_message(uid, "⚠️ Magazin nomi kamida 2 belgi boʻlishi kerak. Qaytadan yozing:")
+
+    lat = sess.get("report", {}).get("location", {}).get("lat")
+    lon = sess.get("report", {}).get("location", {}).get("lon")
+    if not lat or not lon:
+        # Agar lokatsiya yo'qolgan bo'lsa, qaytadan lokatsiya so'rang
+        sess["step"] = "location"
+        return bot.send_message(uid, "📍 Avval lokatsiyani yuboring!", reply_markup=location_kb())
+
+    try:
+        shop = add_shop(text, lat, lon)
+        sess["report"]["shop_name"] = shop["name"]
+        sess["report"]["shop_id"] = shop["id"]
+        sess["step"] = "photo"
+        bot.send_message(uid,
+            f"✅ Yangi magazin: <b>{shop['name']}</b>\n\n"
+            "📸 <b>2-qadam: Foto</b>\n\n"
+            "📷 Kamerani oching va jonli foto yuboring:",
+            parse_mode="HTML", reply_markup=back_kb())
+    except Exception as e:
+        print(f"XATOLIK: {e}")
+        bot.send_message(uid,
+            f"❌ Magazinni saqlashda xatolik:\n<code>{e}</code>\n\n"
+            "Iltimos, qayta urinib koʻring yoki adminga xabar bering.",
+            parse_mode="HTML", reply_markup=back_kb())
 
 @bot.message_handler(content_types=["photo"])
 def receive_photo(msg):
