@@ -540,16 +540,23 @@ def receive_location(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "shop_select")
 def select_shop(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text
-    if text == "⬅️ Orqaga": sessions.pop(uid, None); return bot.send_message(uid, "↩️", reply_markup=main_kb(get_user(uid)["role"]))
-    if text == "🆕 Yangi magazin": sess["step"] = "new_shop"; return bot.send_message(uid, "🏪 Yangi magazin nomini yozing:", reply_markup=back_kb())
+    uid = msg.from_user.id
+    sess = sessions.get(uid)
+    if not sess: return
+    text = (msg.text or "").strip()
+    if text == "⬅️ Orqaga":
+        sessions.pop(uid, None)
+        user = get_user(uid)
+        return bot.send_message(uid, "↩️", reply_markup=main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
+    if text == "🆕 Yangi magazin":
+        sess["step"] = "new_shop"
+        return bot.send_message(uid, "🏪 Yangi magazin nomini yozing:", reply_markup=back_kb())
     for s in sess.get("nearby_shops", []):
         if text.startswith(f"🏪 {s['name']}"):
             sess["report"]["shop_name"], sess["report"]["shop_id"] = s["name"], s["id"]
             sess.pop("nearby_shops", None); sess["step"] = "photo"
             return bot.send_message(uid, f"✅ {s['name']}\n\n📸 <b>2-qadam: Foto</b>", parse_mode="HTML", reply_markup=back_kb())
     bot.send_message(uid, "⚠️ Ro'yxatdan tanlang.")
-
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "new_shop")
 def new_shop_name(msg):
     uid = msg.from_user.id
@@ -620,20 +627,42 @@ def receive_photo(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "products")
 def select_product(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text
+    uid = msg.from_user.id
+    sess = sessions.get(uid)
+    if not sess: return
+    text = (msg.text or "").strip()
     if text == "✅ Tayyor":
-        if not sess["report"]["product_counts"]: return bot.send_message(uid, "⚠️ Kamida 1 ta mahsulot!")
-        sess["step"], sess["report"]["vozvrat_counts"] = "vozvrat", {}
-        return bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar. Yo'q bo'lsa ✅ Tayyor:", parse_mode="HTML", reply_markup=products_kb({}))
+        if not sess["report"]["product_counts"]:
+            return bot.send_message(uid, "⚠️ Kamida 1 ta mahsulot tanlang!")
+        sess["step"] = "vozvrat"
+        sess["report"]["vozvrat_counts"] = {}
+        return bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar. Yo'q bo'lsa ✅ Tayyor bosing:", parse_mode="HTML", reply_markup=products_kb({}))
+    if text == "⬅️ Orqaga":
+        return  # go_back handler hal qiladi
+    # Mahsulot tanlov — indeks bo'yicha xavfsiz moslashtirish
     for i, p in enumerate(PRODUCTS):
         cnt = sess["report"]["product_counts"].get(str(i), 0)
-        if text in (p['name'], f"{p['name']} [{cnt} ta]"):
-            sess["step"], sess["selected_product"], sess["qty_input"] = "qty_sale", i, ""
-            return bot.send_message(uid, f"📦 <b>{p['name']}</b>\nNarxi: {fmt(p['price'])} so'm\n\nSoni: <b>0</b>", parse_mode="HTML", reply_markup=qty_numpad_kb())
+        label_with_cnt = f"{p['name']} [{cnt} ta]"
+        # Ikki variantni ham tekshiramiz: sof nom va sonli nom
+        if text == p['name'] or text == label_with_cnt or text.startswith(p['name']):
+            sess["step"] = "qty_sale"
+            sess["selected_product"] = i
+            sess["qty_input"] = ""
+            cur_qty = sess["report"]["product_counts"].get(str(i), 0)
+            msg_text = (
+                f"📦 <b>{p['name']}</b>\n"
+                f"Narxi: <b>{fmt(p['price'])} so'm</b>\n"
+                + (f"Joriy soni: <b>{cur_qty} ta</b>\n" if cur_qty > 0 else "")
+                + "\nYangi soni:"
+            )
+            return bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=qty_numpad_kb())
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_sale")
 def receive_qty_sale(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text.strip()
+    uid = msg.from_user.id
+    sess = sessions.get(uid)
+    if not sess: return
+    text = (msg.text or "").strip()
     idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
     nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
     if text in nm:
@@ -654,17 +683,36 @@ def receive_qty_sale(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "vozvrat")
 def select_vozvrat(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text
-    if text == "✅ Tayyor": sess["report"]["expired"]=[]; return finish_report(uid)
+    uid = msg.from_user.id
+    sess = sessions.get(uid)
+    if not sess: return
+    text = (msg.text or "").strip()
+    if text == "✅ Tayyor":
+        sess["report"]["expired"] = []
+        return finish_report(uid)
+    if text == "⬅️ Orqaga":
+        return  # go_back handler hal qiladi
     for i, p in enumerate(PRODUCTS):
-        cnt = sess["report"]["vozvrat_counts"].get(str(i),0)
-        if text in (p['name'], f"{p['name']} [{cnt} ta]"):
-            sess["step"], sess["selected_product"], sess["qty_input"] = "qty_vozvrat", i, ""
-            return bot.send_message(uid, f"🔄 <b>{p['name']}</b>\n\nSoni: <b>0</b>", parse_mode="HTML", reply_markup=qty_numpad_kb())
+        cnt = sess["report"]["vozvrat_counts"].get(str(i), 0)
+        label_with_cnt = f"{p['name']} [{cnt} ta]"
+        if text == p['name'] or text == label_with_cnt or text.startswith(p['name']):
+            sess["step"] = "qty_vozvrat"
+            sess["selected_product"] = i
+            sess["qty_input"] = ""
+            cur_qty = sess["report"]["vozvrat_counts"].get(str(i), 0)
+            msg_text = (
+                f"🔄 <b>{p['name']}</b>\n"
+                + (f"Joriy vozvrat: <b>{cur_qty} ta</b>\n" if cur_qty > 0 else "")
+                + "\nYangi soni:"
+            )
+            return bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=qty_numpad_kb())
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_vozvrat")
 def receive_qty_vozvrat(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text.strip()
+    uid = msg.from_user.id
+    sess = sessions.get(uid)
+    if not sess: return
+    text = (msg.text or "").strip()
     idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
     nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
     if text in nm:
