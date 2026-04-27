@@ -268,9 +268,11 @@ def go_back(msg):
             return bot.send_message(uid, "↩️", reply_markup=kb)
         return
     step = sess.get("step", "")
+    def role_kb():
+        return admin_kb() if is_admin(uid) else (main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
     if step in ("location", "shop_select", "new_shop"):
         sessions.pop(uid, None)
-        bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=main_kb(user["role"]))
+        bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=role_kb())
     elif step == "photo":
         sess["step"] = "location"
         bot.send_message(uid, "📍 <b>1-qadam: Lokatsiya</b>", parse_mode="HTML", reply_markup=location_kb())
@@ -282,12 +284,10 @@ def go_back(msg):
         bot.send_message(uid, "📦 <b>3-qadam: Mahsulotlar</b>", parse_mode="HTML", reply_markup=products_kb(sess["report"].get("product_counts", {})))
     elif step in ("client_menu","client_search","client_add_name","client_add_address","client_add_phone","client_add_location","client_detail"):
         sessions.pop(uid, None)
-        kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
-        bot.send_message(uid, "↩️", reply_markup=kb)
+        bot.send_message(uid, "↩️", reply_markup=role_kb())
     elif step in ("my_report_menu","admin_report_menu","pick_agent","admin_date_from","admin_date_to","my_date_from","my_date_to","pick_product","pick_shop"):
         sessions.pop(uid, None)
-        kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
-        bot.send_message(uid, "↩️", reply_markup=kb)
+        bot.send_message(uid, "↩️", reply_markup=role_kb())
 
 # =============================================
 # 👥 MIJOZLAR BO'LIMI
@@ -524,7 +524,18 @@ def start_visit(msg):
 @bot.message_handler(content_types=["location"])
 def receive_location(msg):
     uid = msg.from_user.id; sess = sessions.get(uid)
-    if not sess or sess["step"] != "location": return
+    if not sess: return
+    step = sess.get("step", "")
+    # Handle client location save
+    if step == "client_add_location":
+        nc = sess.get("new_client", {})
+        client = add_client(nc["name"], nc["address"], nc["phone"], msg.location.latitude, msg.location.longitude)
+        sessions.pop(uid, None)
+        bot.send_location(uid, client["lat"], client["lon"])
+        bot.send_message(uid, f"✅ Mijoz lokatsiya bilan saqlandi!\n\n👤 <b>{client['name']}</b>\n📍 {client['address']}\n📞 {client['phone']}", parse_mode="HTML")
+        show_client_menu(uid)
+        return
+    if step != "location": return
     lat, lon = msg.location.latitude, msg.location.longitude
     sess["report"]["location"] = {"lat": lat, "lon": lon}
     nearby = find_nearby_shops(lat, lon, 100)
@@ -540,7 +551,9 @@ def receive_location(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "shop_select")
 def select_shop(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text
+    uid, text = msg.from_user.id, msg.text
+    sess = sessions.get(uid)
+    if not sess: return
     if text == "⬅️ Orqaga": sessions.pop(uid, None); return bot.send_message(uid, "↩️", reply_markup=main_kb(get_user(uid)["role"]))
     if text == "🆕 Yangi magazin": sess["step"] = "new_shop"; return bot.send_message(uid, "🏪 Yangi magazin nomini yozing:", reply_markup=back_kb())
     for s in sess.get("nearby_shops", []):
@@ -620,20 +633,25 @@ def receive_photo(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "products")
 def select_product(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text
+    uid, text = msg.from_user.id, msg.text
+    sess = sessions.get(uid)
+    if not sess: return
     if text == "✅ Tayyor":
         if not sess["report"]["product_counts"]: return bot.send_message(uid, "⚠️ Kamida 1 ta mahsulot!")
         sess["step"], sess["report"]["vozvrat_counts"] = "vozvrat", {}
         return bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar. Yo'q bo'lsa ✅ Tayyor:", parse_mode="HTML", reply_markup=products_kb({}))
     for i, p in enumerate(PRODUCTS):
         cnt = sess["report"]["product_counts"].get(str(i), 0)
-        if text in (p['name'], f"{p['name']} [{cnt} ta]"):
+        label = f"{p['name']} [{cnt} ta]" if cnt > 0 else p['name']
+        if text == p['name'] or text == label:
             sess["step"], sess["selected_product"], sess["qty_input"] = "qty_sale", i, ""
             return bot.send_message(uid, f"📦 <b>{p['name']}</b>\nNarxi: {fmt(p['price'])} so'm\n\nSoni: <b>0</b>", parse_mode="HTML", reply_markup=qty_numpad_kb())
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_sale")
 def receive_qty_sale(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text.strip()
+    uid, text = msg.from_user.id, msg.text.strip()
+    sess = sessions.get(uid)
+    if not sess: return
     idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
     nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
     if text in nm:
@@ -654,17 +672,22 @@ def receive_qty_sale(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "vozvrat")
 def select_vozvrat(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text
+    uid, text = msg.from_user.id, msg.text
+    sess = sessions.get(uid)
+    if not sess: return
     if text == "✅ Tayyor": sess["report"]["expired"]=[]; return finish_report(uid)
     for i, p in enumerate(PRODUCTS):
         cnt = sess["report"]["vozvrat_counts"].get(str(i),0)
-        if text in (p['name'], f"{p['name']} [{cnt} ta]"):
+        label = f"{p['name']} [{cnt} ta]" if cnt > 0 else p['name']
+        if text == p['name'] or text == label:
             sess["step"], sess["selected_product"], sess["qty_input"] = "qty_vozvrat", i, ""
             return bot.send_message(uid, f"🔄 <b>{p['name']}</b>\n\nSoni: <b>0</b>", parse_mode="HTML", reply_markup=qty_numpad_kb())
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_vozvrat")
 def receive_qty_vozvrat(msg):
-    uid, sess, text = msg.from_user.id, sessions[uid], msg.text.strip()
+    uid, text = msg.from_user.id, msg.text.strip()
+    sess = sessions.get(uid)
+    if not sess: return
     idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
     nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
     if text in nm:
@@ -771,7 +794,8 @@ def send_report_menu(uid):
 @bot.message_handler(func=lambda m: m.text == "📊 Mening hisobotlarim")
 def my_reports(msg):
     uid=msg.from_user.id
-    if get_user(uid).get("role")!="agent": return
+    u=get_user(uid)
+    if not u or u.get("role")!="agent": return
     sessions[uid]={"step":"my_report_menu","agent_filter":uid}; send_report_menu(uid)
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step")=="my_report_menu")
@@ -786,7 +810,10 @@ def my_rep(msg):
     elif tx=="📋 Batafsil hisobot": reps=get_reports_by_period("2000-01-01",today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Barcha hisobotlarim"),parse_mode="HTML")
     elif tx=="🗓 Sana oralig'i": sessions[uid]["step"]="my_date_from"; bot.send_message(uid,"Boshlanish sanasi:\n<i>2026-04-01</i>",parse_mode="HTML",reply_markup=back_kb())
 
-def is_mgr(uid): return is_admin(uid) or get_user(uid).get("role") in ("supervisor","manager")
+def is_mgr(uid):
+    if is_admin(uid): return True
+    u = get_user(uid)
+    return u is not None and u.get("role") in ("supervisor", "manager")
 
 @bot.message_handler(func=lambda m: m.text=="📊 Hisobotlar" and is_mgr(m.from_user.id))
 def admin_reports(msg):
@@ -866,7 +893,7 @@ def pick_shop(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step") in ("my_date_from","admin_date_from"))
 def date_from(msg):
-    uid,ss=msg.from_user.id,sessions[uid]; tx=msg.text.strip()
+    uid=msg.from_user.id; ss=sessions.get(uid,{}); tx=msg.text.strip()
     if tx=="⬅️ Orqaga": rs="my_report_menu" if ss["step"]=="my_date_from" else "admin_report_menu"; sessions[uid]={"step":rs,"agent_filter":ss.get("agent_filter")}; return send_report_menu(uid)
     try:
         datetime.strptime(tx,"%Y-%m-%d"); ss["date_from"]=tx
@@ -876,7 +903,7 @@ def date_from(msg):
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step") in ("my_date_to","admin_date_to"))
 def date_to(msg):
-    uid,ss=msg.from_user.id,sessions[uid]; tx=msg.text.strip()
+    uid=msg.from_user.id; ss=sessions.get(uid,{}); tx=msg.text.strip()
     if tx=="⬅️ Orqaga": rs="my_report_menu" if ss["step"]=="my_date_to" else "admin_report_menu"; sessions[uid]={"step":rs,"agent_filter":ss.get("agent_filter")}; return send_report_menu(uid)
     try:
         datetime.strptime(tx,"%Y-%m-%d"); rs="my_report_menu" if ss["step"]=="my_date_to" else "admin_report_menu"
