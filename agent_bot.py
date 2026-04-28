@@ -555,8 +555,8 @@ def receive_location(msg):
     if not sess or sess["step"] != "location": return
     lat, lon = msg.location.latitude, msg.location.longitude
     sess["report"]["location"] = {"lat": lat, "lon": lon}
-    # 🔍 100m ichidagi klientlarni ko'rsatish
-    nearby_clients = find_nearby_clients_gps(lat, lon, 100)
+    # 🔍 300m ichidagi klientlarni ko'rsatish
+    nearby_clients = find_nearby_clients_gps(lat, lon, 300)
     if nearby_clients:
         text = "👥 <b>100m ichidagi klientlar:</b>\n\n"
         for i, c in enumerate(nearby_clients[:15], 1):
