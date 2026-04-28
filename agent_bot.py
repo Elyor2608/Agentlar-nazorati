@@ -753,40 +753,24 @@ def receive_qty_sale(msg):
     uid = msg.from_user.id
     sess = sessions.get(uid)
     if not sess: return
-    
     text = (msg.text or "").strip()
-    idx = sess.get("selected_product")
-    p = PRODUCTS[idx]
-
-    if text == "✅ Tayyor":
-        qty = int(sess.get("qty_input", "0"))
-        sess.pop("qty_input", None)
-        if qty > 0:
-            sess["report"]["product_counts"][str(idx)] = qty
-        else:
-            sess["report"]["product_counts"].pop(str(idx), None)
-        
+    idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
+    nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
+    if text in nm:
+        cur = sess.get("qty_input","") + nm[text]; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
+        sess["qty_input"] = cur; qty = int(cur)
+        bot.send_message(uid, f"📦 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta" + (f"\nJami: <b>{fmt(qty*p['price'])} so'm</b>" if qty>0 else ""), parse_mode="HTML", reply_markup=qty_numpad_kb())
+    elif text == "🔙":
+        cur = sess.get("qty_input",""); cur = cur[:-1] if len(cur)>1 else "0"; sess["qty_input"] = cur
+        bot.send_message(uid, f"📦 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_kb())
+    elif text == "✅ Tasdiqlash":
+        qty = int(sess.get("qty_input","0")); sess.pop("qty_input",None)
+        if qty>0: sess["report"]["product_counts"][str(idx)] = qty
+        else: sess["report"]["product_counts"].pop(str(idx), None)
         sess["step"] = "products"
-        return bot.send_message(uid, f"✅ {p['name']} saqlandi.", 
-                                reply_markup=products_kb(sess["report"]["product_counts"]))
-
-    if text == "⬅️ Orqaga":
-        sess.pop("qty_input", None)
-        sess["step"] = "products"
-        return bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["product_counts"]))
-
-    # Agar foydalanuvchi son yuborsa
-    if text.isdigit():
-        qty = int(text)
-        sess["qty_input"] = str(qty)
-        bot.send_message(uid, 
-            f"📦 <b>{p['name']}</b>\n"
-            f"Soni: <b>{qty}</b> ta\n"
-            f"Jami: <b>{fmt(qty * p['price'])} so'm</b>\n\n"
-            "Tasdiqlash uchun ✅ Tayyor tugmasini bosing yoki yangi son kiriting.", 
-            parse_mode="HTML", reply_markup=qty_kb())
-    else:
-        bot.send_message(uid, "⚠️ Iltimos, mahsulot sonini sonlar bilan kiriting.")
+        bot.send_message(uid, f"✅ <b>{p['name']}</b> — {qty} ta" + (f" ({fmt(qty*p['price'])} so'm)" if qty>0 else ""), parse_mode="HTML", reply_markup=products_kb(sess["report"]["product_counts"]))
+    elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="products"; bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["product_counts"]))
+    else: bot.send_message(uid, "⚠️ Tugmalardan foydalaning!")
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "vozvrat")
 def select_vozvrat(msg):
@@ -819,35 +803,22 @@ def receive_qty_vozvrat(msg):
     uid = msg.from_user.id
     sess = sessions.get(uid)
     if not sess: return
-    
     text = (msg.text or "").strip()
-    idx = sess.get("selected_product")
-    p = PRODUCTS[idx]
-
-    if text == "✅ Tayyor":
-        qty = int(sess.get("qty_input", "0"))
-        sess.pop("qty_input", None)
-        if qty > 0:
-            sess["report"]["vozvrat_counts"][str(idx)] = qty
-        else:
-            sess["report"]["vozvrat_counts"].pop(str(idx), None)
-        
-        sess["step"] = "vozvrat"
-        return bot.send_message(uid, f"✅ {p['name']} vozvrat saqlandi.", 
-                                reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
-
-    if text == "⬅️ Orqaga":
-        sess.pop("qty_input", None)
-        sess["step"] = "vozvrat"
-        return bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
-
-    if text.isdigit():
-        qty = int(text)
-        sess["qty_input"] = str(qty)
-        bot.send_message(uid, f"🔄 <b>{p['name']} (Vozvrat)</b>\nSoni: <b>{qty}</b> ta", 
-                         parse_mode="HTML", reply_markup=qty_kb())
-    else:
-        bot.send_message(uid, "⚠️ Iltimos, son kiriting.")
+    idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
+    nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
+    if text in nm:
+        cur = sess.get("qty_input","")+nm[text]; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
+        sess["qty_input"] = cur; bot.send_message(uid, f"🔄 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_kb())
+    elif text == "🔙":
+        cur = sess.get("qty_input",""); cur = cur[:-1] if len(cur)>1 else "0"; sess["qty_input"]=cur
+        bot.send_message(uid, f"🔄 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_kb())
+    elif text == "✅ Tasdiqlash":
+        qty = int(sess.get("qty_input","0")); sess.pop("qty_input",None)
+        if qty>0: sess["report"]["vozvrat_counts"][str(idx)] = qty
+        else: sess["report"]["vozvrat_counts"].pop(str(idx), None)
+        sess["step"]="vozvrat"; bot.send_message(uid, f"✅ <b>{p['name']}</b> vozvrat — {qty} ta", parse_mode="HTML", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
+    elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="vozvrat"; bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
+    else: bot.send_message(uid, "⚠️ Tugmalardan foydalaning!")
 
 def auto_save_client_from_report(r):
     """Savdo yakunlanganda do'konni mijozlar ro'yxatiga avtomatik qo'shish."""
