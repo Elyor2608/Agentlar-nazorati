@@ -56,10 +56,25 @@ def save_shops(shops):
         json.dump(shops, f, ensure_ascii=False, indent=2)
 
 def load_clients():
+    """clients.json + clients_cache.json (Excel) dan o'qiy"""
+    all_clients = []
+    # 1. clients.json - yangi qo'shilgan klientlar
     if os.path.exists(CLIENTS_FILE):
-        with open(CLIENTS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    return []
+        try:
+            with open(CLIENTS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+                if data: all_clients.extend(data if isinstance(data, list) else [])
+        except:
+            pass
+    # 2. clients_cache.json - Excel bazasi (1793 ta klient)
+    if os.path.exists("clients_cache.json"):
+        try:
+            with open("clients_cache.json", encoding="utf-8") as f:
+                data = json.load(f)
+                if data: all_clients.extend(data if isinstance(data, list) else [])
+        except:
+            pass
+    return all_clients
 
 def save_clients(clients):
     with open(CLIENTS_FILE, "w", encoding="utf-8") as f:
