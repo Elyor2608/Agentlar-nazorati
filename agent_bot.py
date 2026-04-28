@@ -112,6 +112,34 @@ def add_shop(name, lat, lon):
     save_shops(shops)
     return shop
 
+def find_nearby_clients_gps(lat, lon, radius=100):
+    """Excel bazasidan va clients.json dan 100m ichidagi klientlarni qaytaradi."""
+    results = []
+    # 1. clients_cache.json — Excel fayldan yuklangan klientlar
+    if os.path.exists("clients_cache.json"):
+        try:
+            with open("clients_cache.json", encoding="utf-8") as f:
+                cache = json.load(f)
+            for c in cache:
+                clat = c.get("lat")
+                clng = c.get("lng")
+                if clat and clng:
+                    dist = haversine(lat, lon, clat, clng)
+                    if dist <= radius:
+                        results.append({"name": c["name"], "address": c.get("address", "—"), "distance": int(dist)})
+        except Exception:
+            pass
+    # 2. clients.json — qo'lda kiritilgan klientlar
+    for c in load_clients():
+        clat = c.get("lat")
+        clng = c.get("lon")
+        if clat and clng:
+            dist = haversine(lat, lon, clat, clng)
+            if dist <= radius:
+                results.append({"name": c["name"], "address": c.get("address", "—"), "distance": int(dist)})
+    results.sort(key=lambda x: x["distance"])
+    return results
+
 # =============================================
 # 👥 MIJOZLAR
 # =============================================
@@ -527,6 +555,14 @@ def receive_location(msg):
     if not sess or sess["step"] != "location": return
     lat, lon = msg.location.latitude, msg.location.longitude
     sess["report"]["location"] = {"lat": lat, "lon": lon}
+    # 🔍 100m ichidagi klientlarni ko'rsatish
+    nearby_clients = find_nearby_clients_gps(lat, lon, 100)
+    if nearby_clients:
+        text = "👥 <b>100m ichidagi klientlar:</b>\n\n"
+        for i, c in enumerate(nearby_clients[:15], 1):
+            text += f"{i}. <b>{c['name']}</b>\n   📍 {c['address']}\n   📏 {c['distance']} metr\n\n"
+        bot.send_message(uid, text, parse_mode="HTML")
+    # 🏪 Magazin tanlash (o'zgarmagan)
     nearby = find_nearby_shops(lat, lon, 100)
     if nearby:
         sess["step"] = "shop_select"; sess["nearby_shops"] = nearby
