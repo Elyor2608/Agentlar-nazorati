@@ -325,6 +325,10 @@ def go_back(msg):
     elif step == "vozvrat":
         sess["step"] = "products"
         bot.send_message(uid, "📦 <b>3-qadam: Mahsulotlar</b>", parse_mode="HTML", reply_markup=products_kb(sess["report"].get("product_counts", {})))
+    elif step == "polka_photo":
+        # Vozvrat qadamiga qaytish
+        sess["step"] = "vozvrat"
+        bot.send_message(uid, "↩️ Vozvratlarga qaytildi.", reply_markup=products_kb(sess["report"].get("vozvrat_counts", {})))
     elif step in ("client_menu","client_search","client_add_name","client_add_address","client_add_phone","client_add_location","client_detail"):
         sessions.pop(uid, None)
         kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
@@ -843,19 +847,33 @@ def receive_qty_vozvrat(msg):
     elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="vozvrat"; bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
     else: bot.send_message(uid, "⚠️ Tugmalardan foydalaning!")
 
-@bot.message_handler(content_types=["photo"], func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "polka_photo")
+# ── 5‑qadam: rasm bo‘lmagan kontentlarni tutish (bu handler rasm handleridan oldin bo‘lishi kerak) ──
+@bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "polka_photo",
+                     content_types=["text", "sticker", "document", "video", "audio", "voice"])
+def polka_not_photo(msg):
+    uid = msg.from_user.id
+    bot.send_message(uid, "❌ Iltimos, kameradan <b>jonli rasm</b> yuboring.\n"
+                          "Yoki tugatish uchun kerakli amalni bajaring.",
+                     parse_mode="HTML", reply_markup=back_kb())
+
+# ── 5‑qadam: rasm qabul qilish (tuzatilgan) ──
+@bot.message_handler(content_types=["photo"], 
+                     func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "polka_photo")
 def receive_polka_photo(msg):
     uid = msg.from_user.id; sess = sessions.get(uid)
     if not sess: return
-    if msg.forward_date:
-        return bot.send_message(uid, "❌ Forward foto yuborildi! Kameradan yangi foto oling.")
+    # forward yoki media_group (albom) bo‘lsa, qabul qilmaymiz
+    if msg.forward_date or msg.media_group_id:
+        return bot.send_message(uid, "❌ Iltimos, faqat bitta jonli foto yuboring (kameradan olingan)!")
+
     sess["report"]["polka_photo_id"] = msg.photo[-1].file_id
     sess["report"]["polka_photo_time"] = now_str()
     try:
         finish_report(uid)
     except Exception as e:
         print(f"❌ finish_report xatosi: {e}")
-        bot.send_message(uid, "⚠️ Texnik xato yuz berdi. Admin bilan bog'laning.", reply_markup=main_kb(get_user(uid)["role"]))
+        bot.send_message(uid, "⚠️ Texnik xato yuz berdi. Admin bilan bog'laning.",
+                         reply_markup=main_kb(get_user(uid)["role"]))
         sessions.pop(uid, None)
 
 def auto_save_client_from_report(r):
