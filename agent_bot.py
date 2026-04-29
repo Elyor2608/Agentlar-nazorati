@@ -798,7 +798,12 @@ def select_vozvrat(msg):
     text = (msg.text or "").strip()
     if text == "✅ Tayyor":
         sess["report"]["expired"] = []
-        return finish_report(uid)
+        # 5-qadam: polka foto
+        sess["step"] = "polka_photo"
+        return bot.send_message(uid,
+            "📸 <b>5-qadam: Polka foto</b>\n\n"
+            "Mahsulotni joylashtirgan polkangiz rasmini yuboring:",
+            parse_mode="HTML", reply_markup=back_kb())
     if text == "⬅️ Orqaga":
         return  # go_back handler hal qiladi
     for i, p in enumerate(PRODUCTS):
@@ -837,6 +842,18 @@ def receive_qty_vozvrat(msg):
         sess["step"]="vozvrat"; bot.send_message(uid, f"✅ <b>{p['name']}</b> vozvrat — {qty} ta", parse_mode="HTML", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
     elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="vozvrat"; bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
     else: bot.send_message(uid, "⚠️ Tugmalardan foydalaning!")
+
+@bot.message_handler(content_types=["photo"], func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "polka_photo")
+def receive_polka_photo(msg):
+    uid = msg.from_user.id; sess = sessions.get(uid)
+    if not sess: return
+    if msg.forward_date or msg.media_group_id:
+        return bot.send_message(uid, "❌ Faqat kameradan jonli foto!")
+    if int(time.time()) - msg.date > 120:
+        return bot.send_message(uid, "❌ Eski foto! Yangi foto oling.")
+    sess["report"]["polka_photo_id"] = msg.photo[-1].file_id
+    sess["report"]["polka_photo_time"] = now_str()
+    finish_report(uid)
 
 def auto_save_client_from_report(r):
     """Savdo yakunlanganda do'konni mijozlar ro'yxatiga avtomatik qo'shish."""
@@ -880,12 +897,16 @@ def finish_report(uid):
     bot.send_message(uid, sm, parse_mode="HTML", reply_markup=main_kb(get_user(uid)["role"]))
     at = f"━━━━━━━━━━━━━━━━━━━━\n📋 <b>Yangi hisobot</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 {r['agent_name']}\n🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n📦 Sotuv:\n{st}\n💰 Sotuv: <b>{fmt(ts)} so'm</b>\n\n🔄 Vozvrat:\n{vt}\n↩️ Vozvrat: <b>{fmt(tv)} so'm</b>\n\n💵 Sof: <b>{fmt(nt)} so'm</b>\n━━━━━━━━━━━━━━━━━━━━"
     bot.send_photo(ADMIN_ID, r["photo_id"], caption=at, parse_mode="HTML")
+    if r.get("polka_photo_id"):
+        bot.send_photo(ADMIN_ID, r["polka_photo_id"], caption="🛒 Polka foto")
     bot.send_location(ADMIN_ID, r["location"]["lat"], r["location"]["lon"])
     d2=load()
     for u_id,u in d2["users"].items():
         if u.get("role") in ("supervisor","manager") and u.get("approved"):
             try:
                 bot.send_photo(int(u_id), r["photo_id"], caption=at, parse_mode="HTML")
+                if r.get("polka_photo_id"):
+                    bot.send_photo(int(u_id), r["polka_photo_id"], caption="🛒 Polka foto")
                 bot.send_location(int(u_id), r["location"]["lat"], r["location"]["lon"])
             except: pass
     sessions.pop(uid, None)
@@ -1056,7 +1077,15 @@ def gen_excel(reps, fn="hisobot.xlsx"):
 
 def send_report_menu(uid):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("📅 Bugun","📆 Bu oy"); kb.add("👤 Agent bo'yicha","📦 Mahsulot bo'yicha"); kb.add("🏪 Magazin bo'yicha","🗓 Sana oralig'i"); kb.add("📤 Excel yuklash","📋 Batafsil hisobot"); kb.add("⬅️ Orqaga")
+    kb.add("📅 Bugun", "📆 Bu oy")
+    user = get_user(uid)
+    if user and user.get("role") != "agent":
+        kb.add("👤 Agent bo'yicha", "📦 Mahsulot bo'yicha")
+    else:
+        kb.add("📦 Mahsulot bo'yicha")
+    kb.add("🏪 Magazin bo'yicha", "🗓 Sana oralig'i")
+    kb.add("📤 Excel yuklash", "📋 Batafsil hisobot")
+    kb.add("⬅️ Orqaga")
     bot.send_message(uid, "📊 <b>Hisobotlar paneli</b>", parse_mode="HTML", reply_markup=kb)
 
 @bot.message_handler(func=lambda m: m.text == "📊 Mening hisobotlarim")
@@ -1102,7 +1131,9 @@ def show_agent_filter(uid,rs):
     if not agents: return bot.send_message(uid,"Hali agent yo'q.")
     kb=types.ReplyKeyboardMarkup(resize_keyboard=True); kb.add("🌐 Barcha agentlar")
     for u_id,u in agents: kb.add(f"{u['name']} [{u_id}]")
-    kb.add("⬅️ Orqaga"); sessions[uid]={"step":"pick_agent","agent_return":rs,"agents_map":{f"{u['name']} [{u_id}]":u_id for u_id,u in agents}}
+    kb.add("⬅️ Orqaga")
+    prev_filter = sessions.get(uid, {}).get("agent_filter")
+    sessions[uid]={"step":"pick_agent","agent_return":rs,"agent_filter":prev_filter,"agents_map":{f"{u['name']} [{u_id}]":u_id for u_id,u in agents}}
     bot.send_message(uid,"👤 Agentni tanlang:",reply_markup=kb)
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step")=="pick_agent")
@@ -1120,7 +1151,9 @@ def pick_agent(msg):
 def show_product_filter(uid,rs):
     kb=types.ReplyKeyboardMarkup(resize_keyboard=True); kb.add("📦 Barcha mahsulotlar")
     for p in PRODUCTS: kb.add(p['name'])
-    kb.add("⬅️ Orqaga"); sessions[uid]={"step":"pick_product","product_return":rs}
+    kb.add("⬅️ Orqaga")
+    prev_filter = sessions.get(uid, {}).get("agent_filter")
+    sessions[uid]={"step":"pick_product","product_return":rs,"agent_filter":prev_filter}
     bot.send_message(uid,"📦 Mahsulotni tanlang:",reply_markup=kb)
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step")=="pick_product")
@@ -1142,7 +1175,9 @@ def show_shop_filter(uid,rs):
         if r.get("shop_name"): sn.add(r["shop_name"])
     kb=types.ReplyKeyboardMarkup(resize_keyboard=True); kb.add("🏬 Barcha magazinlar")
     for n in sorted(sn): kb.add(f"🏪 {n}")
-    kb.add("⬅️ Orqaga"); sessions[uid]={"step":"pick_shop","shop_return":rs}
+    kb.add("⬅️ Orqaga")
+    prev_filter = sessions.get(uid, {}).get("agent_filter")
+    sessions[uid]={"step":"pick_shop","shop_return":rs,"agent_filter":prev_filter}
     bot.send_message(uid,"🏪 Magazinni tanlang:",reply_markup=kb)
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step")=="pick_shop")
