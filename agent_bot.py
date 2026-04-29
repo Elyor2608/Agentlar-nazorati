@@ -847,13 +847,16 @@ def receive_qty_vozvrat(msg):
 def receive_polka_photo(msg):
     uid = msg.from_user.id; sess = sessions.get(uid)
     if not sess: return
-    if msg.forward_date or msg.media_group_id:
-        return bot.send_message(uid, "❌ Faqat kameradan jonli foto!")
-    if int(time.time()) - msg.date > 120:
-        return bot.send_message(uid, "❌ Eski foto! Yangi foto oling.")
+    if msg.forward_date:
+        return bot.send_message(uid, "❌ Forward foto yuborildi! Kameradan yangi foto oling.")
     sess["report"]["polka_photo_id"] = msg.photo[-1].file_id
     sess["report"]["polka_photo_time"] = now_str()
-    finish_report(uid)
+    try:
+        finish_report(uid)
+    except Exception as e:
+        print(f"❌ finish_report xatosi: {e}")
+        bot.send_message(uid, "⚠️ Texnik xato yuz berdi. Admin bilan bog'laning.", reply_markup=main_kb(get_user(uid)["role"]))
+        sessions.pop(uid, None)
 
 def auto_save_client_from_report(r):
     """Savdo yakunlanganda do'konni mijozlar ro'yxatiga avtomatik qo'shish."""
@@ -964,116 +967,196 @@ def gen_excel(reps, fn="hisobot.xlsx"):
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()
+
+    C_DARK  = "1F3864"; C_HEAD  = "2E75B6"; C_HEAD2 = "17375E"
+    C_WHITE = "FFFFFF"; C_GREEN = "E2EFDA"; C_RED   = "FCE4D6"
+    C_BLUE  = "DEEAF1"; C_ALT   = "F2F7FB"; C_TOTAL = "BDD7EE"
+    C_SUMBOX= "D6E4F0"; C_DARK2 = "1F3864"
+
+    thin = Side(style="thin", color="C0C0C0")
+    brd  = Border(left=thin, right=thin, top=thin, bottom=thin)
+    SOM  = "#,##0"
+
+    def h(ws, row, col, val, bg=C_HEAD, fg=C_WHITE, sz=10, bold=True, align="center"):
+        c = ws.cell(row=row, column=col, value=val)
+        c.font      = Font(bold=bold, color=fg, name="Calibri", size=sz)
+        c.fill      = PatternFill("solid", start_color=bg)
+        c.alignment = Alignment(horizontal=align, vertical="center", wrap_text=True)
+        c.border    = brd
+        return c
+
+    def d(ws, row, col, val, fmt=None, bg=None, bold=False, align="center"):
+        c = ws.cell(row=row, column=col, value=val)
+        c.font      = Font(name="Calibri", size=10, bold=bold)
+        c.alignment = Alignment(horizontal=align, vertical="center")
+        c.border    = brd
+        if fmt: c.number_format = fmt
+        if bg:  c.fill = PatternFill("solid", start_color=bg)
+        return c
+
+    # ── 1-VARAQ: Batafsil ────────────────────────────────────────────
     ws = wb.active
-    ws.title = "Hisobot"
+    ws.title = "Batafsil hisobot"
+    ws.sheet_view.showGridLines = False
 
-    # Ranglar
-    HEADER_BG = "1F4E79"   # to'q ko'k
-    HEADER_FG = "FFFFFF"   # oq
-    TOTAL_BG  = "D6E4F0"   # och ko'k
-    PROD_BG   = "EBF5FB"   # juda och ko'k
-    VOZV_BG   = "FDECEA"   # och qizil
+    last_col = 5 + len(PRODUCTS)*2 + 3
 
-    thin = Side(style="thin", color="BFBFBF")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    c = ws["A1"]
+    c.value     = "SAVDO HISOBOTI  —  Agent nazorati MEHR"
+    c.font      = Font(bold=True, size=15, color=C_WHITE, name="Calibri")
+    c.fill      = PatternFill("solid", start_color=C_DARK)
+    c.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 36
 
-    def hcell(ws, row, col, val, bg=HEADER_BG, fg=HEADER_FG, bold=True):
-        c = ws.cell(row=row, column=col, value=val)
-        c.font = Font(bold=bold, color=fg, name="Arial", size=10)
-        c.fill = PatternFill("solid", start_color=bg)
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.border = border
-        return c
+    total_sale = sum(r.get("total_sale",0) for r in reps)
+    total_vozv = sum(r.get("total_vozv",0) for r in reps)
+    net_total  = sum(r.get("net_total", 0) for r in reps)
+    agents_set = set(r.get("agent_name","") for r in reps)
 
-    def dcell(ws, row, col, val, num_fmt=None, bg=None, bold=False):
-        c = ws.cell(row=row, column=col, value=val)
-        c.font = Font(name="Arial", size=10, bold=bold)
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        c.border = border
-        if num_fmt: c.number_format = num_fmt
-        if bg: c.fill = PatternFill("solid", start_color=bg)
-        return c
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
+    c = ws["A2"]
+    c.value     = (f"Sana: {today_str()}   |   Visit: {len(reps)}   |   "
+                   f"Agentlar: {len(agents_set)}   |   "
+                   f"Sotuv: {total_sale:,} so'm   |   "
+                   f"Vozvrat: {total_vozv:,} so'm   |   "
+                   f"Sof: {net_total:,} so'm")
+    c.font      = Font(size=10, color=C_DARK, name="Calibri", bold=True)
+    c.fill      = PatternFill("solid", start_color=C_SUMBOX)
+    c.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[3].height = 6
 
-    # ---- Sarlavha ----
-    ws.merge_cells("A1:Z1")
-    title_cell = ws["A1"]
-    title_cell.value = "📊 SAVDO HISOBOTI"
-    title_cell.font = Font(bold=True, size=14, color="1F4E79", name="Arial")
-    title_cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 30
-
-    # ---- Ustun boshlari ----
-    headers = ["#", "Sana", "Agent", "Do'kon / Mijoz"]
+    ROW_H = 4
+    base_h = ["#", "Sana", "Vaqt", "Agent", "Mijoz / Do'kon"]
+    prod_h = []
     for p in PRODUCTS:
-        headers.append(f"{p['name']}\n(dona)")
-        headers.append(f"{p['name']}\n(so'm)")
-    headers += ["Sotuv jami\n(so'm)", "Vozvrat\n(so'm)", "Sof daromad\n(so'm)"]
+        pn = p['name'].replace("🥪","").replace("🧒","").replace("🍗","").replace("🍔","").strip()
+        prod_h += [f"{pn}\n(dona)", f"{pn}\n(so'm)"]
+    sum_h  = ["Sotuv\n(so'm)", "Vozvrat\n(so'm)", "SOF\n(so'm)"]
+    all_h  = base_h + prod_h + sum_h
 
-    ROW_H = 2
-    for col, h in enumerate(headers, 1):
-        hcell(ws, ROW_H, col, h)
-    ws.row_dimensions[ROW_H].height = 40
+    for col, hdr in enumerate(all_h, 1):
+        bg = C_HEAD2 if col > len(base_h)+len(prod_h) else C_HEAD
+        h(ws, ROW_H, col, hdr, bg=bg)
+    ws.row_dimensions[ROW_H].height = 42
 
-    # ---- Ma'lumotlar ----
-    num_fmt_som = "#,##0"
     for idx, r in enumerate(reps, 1):
-        row = ROW_H + idx
-        dcell(ws, row, 1, idx)
-        dcell(ws, row, 2, r.get("date",""))
-        dcell(ws, row, 3, r.get("agent_name",""))
-        dcell(ws, row, 4, r.get("shop_name",""))
-        col = 5
+        row    = ROW_H + idx
+        bg_row = C_ALT if idx % 2 == 0 else None
+        tstr   = r.get("started","")[11:16]
+        d(ws, row, 1, idx,                    bg=bg_row)
+        d(ws, row, 2, r.get("date",""),       bg=bg_row)
+        d(ws, row, 3, tstr,                   bg=bg_row)
+        d(ws, row, 4, r.get("agent_name",""), bg=bg_row, align="left")
+        d(ws, row, 5, r.get("shop_name",""),  bg=bg_row, align="left")
+        col = 6
         for i, p in enumerate(PRODUCTS):
-            q = r.get("product_counts",{}).get(str(i), 0)
-            dcell(ws, row, col, q, bg=PROD_BG if q>0 else None); col+=1
-            dcell(ws, row, col, q*p["price"], num_fmt_som, bg=PROD_BG if q>0 else None); col+=1
-        dcell(ws, row, col,   r.get("total_sale",0), num_fmt_som); col+=1
-        dcell(ws, row, col,   r.get("total_vozv",0), num_fmt_som, bg=VOZV_BG if r.get("total_vozv",0)>0 else None); col+=1
-        dcell(ws, row, col,   r.get("net_total",0),  num_fmt_som, bold=True)
+            q  = r.get("product_counts",{}).get(str(i), 0)
+            bg = C_BLUE if q > 0 else bg_row
+            d(ws, row, col,   q,            bg=bg);        col += 1
+            d(ws, row, col,   q*p["price"], SOM, bg=bg);  col += 1
+        d(ws, row, col, r.get("total_sale",0), SOM, bg=C_BLUE if r.get("total_sale",0)>0 else bg_row); col+=1
+        d(ws, row, col, r.get("total_vozv",0), SOM, bg=C_RED  if r.get("total_vozv",0)>0 else bg_row); col+=1
+        d(ws, row, col, r.get("net_total", 0), SOM, bg=C_GREEN, bold=True)
+        ws.row_dimensions[row].height = 18
 
-    # ---- Jami qator ----
     if reps:
-        total_row = ROW_H + len(reps) + 1
-        dcell(ws, total_row, 1, "", bg=TOTAL_BG)
-        dcell(ws, total_row, 2, "", bg=TOTAL_BG)
-        dcell(ws, total_row, 3, "JAMI", bg=TOTAL_BG, bold=True)
-        dcell(ws, total_row, 4, f"{len(reps)} ta visit", bg=TOTAL_BG, bold=True)
-        col = 5
-        data_start = ROW_H + 1
-        data_end   = ROW_H + len(reps)
-        for i, p in enumerate(PRODUCTS):
-            cl = get_column_letter(col)
-            c = ws.cell(total_row, col, f"=SUM({cl}{data_start}:{cl}{data_end})")
-            c.font = Font(bold=True, name="Arial", size=10)
-            c.fill = PatternFill("solid", start_color=TOTAL_BG)
-            c.alignment = Alignment(horizontal="center"); c.border = border; col+=1
-            cl2 = get_column_letter(col)
-            c2 = ws.cell(total_row, col, f"=SUM({cl2}{data_start}:{cl2}{data_end})")
-            c2.font = Font(bold=True, name="Arial", size=10); c2.number_format = num_fmt_som
-            c2.fill = PatternFill("solid", start_color=TOTAL_BG)
-            c2.alignment = Alignment(horizontal="center"); c2.border = border; col+=1
-        for offset in range(3):
-            cl = get_column_letter(col + offset)
-            c = ws.cell(total_row, col+offset, f"=SUM({cl}{data_start}:{cl}{data_end})")
-            c.font = Font(bold=True, name="Arial", size=10); c.number_format = num_fmt_som
-            c.fill = PatternFill("solid", start_color=TOTAL_BG)
-            c.alignment = Alignment(horizontal="center"); c.border = border
-        ws.row_dimensions[total_row].height = 20
+        tr = ROW_H + len(reps) + 1
+        ws.row_dimensions[tr].height = 24
+        for col, val in enumerate(["","","","JAMI", f"{len(reps)} visit"], 1):
+            h(ws, tr, col, val, bg=C_TOTAL, fg=C_DARK)
+        col = 6; ds = ROW_H+1; de = ROW_H+len(reps)
+        for i in range(len(PRODUCTS)*2):
+            cl = get_column_letter(col+i)
+            c  = ws.cell(tr, col+i, f"=SUM({cl}{ds}:{cl}{de})")
+            c.font = Font(bold=True, name="Calibri", size=10, color=C_DARK)
+            c.fill = PatternFill("solid", start_color=C_TOTAL)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = brd
+            if i%2==1: c.number_format = SOM
+        col += len(PRODUCTS)*2
+        for offset, bgc in enumerate([C_BLUE, C_RED, C_GREEN]):
+            cl = get_column_letter(col+offset)
+            c  = ws.cell(tr, col+offset, f"=SUM({cl}{ds}:{cl}{de})")
+            c.font = Font(bold=True, name="Calibri", size=11, color=C_DARK)
+            c.fill = PatternFill("solid", start_color=bgc)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = brd; c.number_format = SOM
 
-    # ---- Ustun kengliklari ----
-    col_widths = [4, 12, 18, 22]
-    for p in PRODUCTS: col_widths += [10, 16]
-    col_widths += [16, 14, 18]
-    for i, w in enumerate(col_widths, 1):
+    widths = [4, 12, 8, 20, 28]
+    for _ in PRODUCTS: widths += [8, 16]
+    widths += [16, 16, 18]
+    for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = f"F{ROW_H+1}"
+    ws.auto_filter.ref = f"A{ROW_H}:{get_column_letter(len(all_h))}{ROW_H}"
 
-    # ---- Freeze & filter ----
-    ws.freeze_panes = f"A{ROW_H+1}"
-    ws.auto_filter.ref = ws.dimensions
+    # ── 2-VARAQ: Agent reytingi ───────────────────────────────────────
+    ws2 = wb.create_sheet("Agent reytingi")
+    ws2.sheet_view.showGridLines = False
 
-    p = "/tmp/" + fn
-    wb.save(p)
-    return p
+    ws2.merge_cells("A1:H1")
+    c = ws2["A1"]
+    c.value     = "AGENT REYTINGI  —  Agent nazorati MEHR"
+    c.font      = Font(bold=True, size=14, color=C_WHITE, name="Calibri")
+    c.fill      = PatternFill("solid", start_color=C_DARK)
+    c.alignment = Alignment(horizontal="center", vertical="center")
+    ws2.row_dimensions[1].height = 34
+    ws2.row_dimensions[2].height = 6
+
+    for col, hdr in enumerate(["#","Agent","Visit","Sotuv (so'm)","Vozvrat (so'm)","Sof (so'm)","O'rtacha (so'm)","Ulushi %"], 1):
+        h(ws2, 3, col, hdr, bg=C_HEAD2)
+    ws2.row_dimensions[3].height = 36
+
+    agent_stats = {}
+    for r in reps:
+        an = r.get("agent_name","Noma'lum")
+        if an not in agent_stats:
+            agent_stats[an] = {"visits":0,"sale":0,"vozv":0,"net":0}
+        agent_stats[an]["visits"] += 1
+        agent_stats[an]["sale"]   += r.get("total_sale",0)
+        agent_stats[an]["vozv"]   += r.get("total_vozv",0)
+        agent_stats[an]["net"]    += r.get("net_total", 0)
+
+    medals = ["🥇","🥈","🥉"]
+    for idx, (name, st) in enumerate(sorted(agent_stats.items(), key=lambda x:x[1]["net"], reverse=True), 1):
+        row    = idx + 3
+        bg_row = C_ALT if idx%2==0 else None
+        avg    = st["sale"]//st["visits"] if st["visits"] else 0
+        share  = round(st["net"]/net_total*100,1) if net_total else 0
+        d(ws2, row, 1, medals[idx-1] if idx<=3 else str(idx), bg=bg_row, bold=(idx<=3))
+        d(ws2, row, 2, name,       bg=bg_row, align="left", bold=(idx==1))
+        d(ws2, row, 3, st["visits"],bg=bg_row)
+        d(ws2, row, 4, st["sale"], SOM, bg=C_BLUE)
+        d(ws2, row, 5, st["vozv"], SOM, bg=C_RED  if st["vozv"]>0 else bg_row)
+        d(ws2, row, 6, st["net"],  SOM, bg=C_GREEN, bold=True)
+        d(ws2, row, 7, avg,        SOM, bg=bg_row)
+        d(ws2, row, 8, f"{share}%",bg=bg_row)
+        ws2.row_dimensions[row].height = 20
+
+    if agent_stats:
+        tr2 = len(agent_stats)+4
+        ws2.row_dimensions[tr2].height = 24
+        h(ws2,tr2,1,"JAMI",bg=C_TOTAL,fg=C_DARK)
+        h(ws2,tr2,2,f"{len(agent_stats)} agent",bg=C_TOTAL,fg=C_DARK)
+        h(ws2,tr2,3,len(reps),bg=C_TOTAL,fg=C_DARK)
+        for col,val,bgc in [(4,total_sale,C_BLUE),(5,total_vozv,C_RED),(6,net_total,C_GREEN)]:
+            c=ws2.cell(tr2,col,val); c.number_format=SOM
+            c.font=Font(bold=True,name="Calibri",size=10,color=C_DARK)
+            c.fill=PatternFill("solid",start_color=bgc)
+            c.alignment=Alignment(horizontal="center",vertical="center"); c.border=brd
+        h(ws2,tr2,7,"",bg=C_TOTAL,fg=C_DARK)
+        h(ws2,tr2,8,"100%",bg=C_TOTAL,fg=C_DARK)
+
+    for col,w in zip("ABCDEFGH",[6,24,8,18,18,20,20,12]):
+        ws2.column_dimensions[col].width = w
+    ws2.freeze_panes = "A4"
+
+    path = f"/tmp/{fn}"
+    wb.save(path)
+    return path
+
 
 def send_report_menu(uid):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
