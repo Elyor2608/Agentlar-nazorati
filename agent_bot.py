@@ -618,17 +618,27 @@ def select_client(msg):
     # Tanlangan klientni topish
     for c in sess.get("nearby_clients", []):
         if text == f"👤 {c['name']} ({c['distance']}m)":
-            sess["report"]["shop_name"]  = c["name"]
-            sess["report"]["shop_id"]    = None
-            sess["nearby_clients_bak"]   = sess.get("nearby_clients", [])
+            sess["report"]["client_name"] = c["name"]
+            sess["report"]["client_address"] = c.get("address", "—")
+            sess["nearby_clients_bak"] = sess.get("nearby_clients", [])
             sess.pop("nearby_clients", None)
-            sess["step"] = "photo"
-            return bot.send_message(uid,
-                f"✅ Mijoz: <b>{c['name']}</b>\n"
-                f"📍 {c.get('address', '—')}\n"
-                f"📏 {c['distance']} metr\n\n"
-                "📸 <b>2-qadam: Foto</b>\n\nJonli foto yuboring:",
-                parse_mode="HTML", reply_markup=back_kb())
+            # Magazin tanlashga o'tish
+            nearby_shops = sess.get("nearby_shops", [])
+            if nearby_shops:
+                sess["step"] = "shop_select"
+                kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                for s in nearby_shops: kb.add(f"🏪 {s['name']} ({s['distance']}m)")
+                kb.add("🆕 Yangi magazin", "⬅️ Orqaga")
+                return bot.send_message(uid,
+                    f"✅ Mijoz: <b>{c['name']}</b>\n\n"
+                    f"🏪 <b>2-qadam: Magazinni tanlang:</b>",
+                    parse_mode="HTML", reply_markup=kb)
+            else:
+                sess["step"] = "new_shop"
+                return bot.send_message(uid,
+                    f"✅ Mijoz: <b>{c['name']}</b>\n\n"
+                    f"🆕 <b>Magazin nomini yozing:</b>",
+                    parse_mode="HTML", reply_markup=back_kb())
 
     bot.send_message(uid, "⚠️ Ro'yxatdan tanlang yoki ➕ Yangi mijoz bosing.")
 
