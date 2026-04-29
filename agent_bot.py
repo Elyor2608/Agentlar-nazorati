@@ -264,16 +264,29 @@ def register_role(msg):
     bot.send_message(uid, "✅ So'rovingiz yuborildi!\n\n⏳ Admin tasdiqlashini kuting.", reply_markup=types.ReplyKeyboardRemove())
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_{uid}_{role}"), types.InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_{uid}"))
-    bot.send_message(ADMIN_ID, f"🆕 <b>Yangi so'rov</b>\n\n👤 {name}\n🆔 {uid}\n🎭 {ROLES[role]}\n📅 {now_str()}", parse_mode="HTML", reply_markup=kb)
+    notify_text = f"🆕 <b>Yangi so'rov</b>\n\n👤 {name}\n🆔 {uid}\n🎭 {ROLES[role]}\n📅 {now_str()}"
+    bot.send_message(ADMIN_ID, notify_text, parse_mode="HTML", reply_markup=kb)
+    # Agent bo'lsa supervayzrlarga ham yuborish
+    if role == "agent":
+        d2 = load()
+        for u_id, u in d2["users"].items():
+            if u.get("role") == "supervisor" and u.get("approved"):
+                try:
+                    kb2 = types.InlineKeyboardMarkup()
+                    kb2.add(types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_{uid}_{role}"),
+                            types.InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_{uid}"))
+                    bot.send_message(int(u_id), notify_text, parse_mode="HTML", reply_markup=kb2)
+                except: pass
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("approve_"))
 def approve_user(call):
     _, uid, role = call.data.split("_"); uid = int(uid)
     data = load(); p = data["pending"].get(str(uid))
-    if not p: return bot.answer_callback_query(call.id, "Topilmadi!")
+    if not p: return bot.answer_callback_query(call.id, "Allaqachon ko'rib chiqilgan!")
     data["users"][str(uid)] = {"name": p["name"], "role": role, "username": p.get("username",""), "registered": p["time"], "approved": True, "total_visits": 0}
     data["pending"].pop(str(uid), None); save(data)
-    bot.answer_callback_query(call.id, "✅"); bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id, "✅ Tasdiqlandi!")
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id)
     bot.send_message(call.message.chat.id, f"✅ <b>{p['name']}</b> tasdiqlandi!", parse_mode="HTML")
     try: bot.send_message(uid, f"🎉 Tabriklaymiz, <b>{p['name']}</b>!\n\nXodim: {ROLES[role]}", parse_mode="HTML", reply_markup=main_kb(role))
     except: pass
@@ -871,7 +884,9 @@ def finish_report(uid):
     d2=load()
     for u_id,u in d2["users"].items():
         if u.get("role") in ("supervisor","manager") and u.get("approved"):
-            try: bot.send_message(int(u_id), f"📋 Yangi hisobot!\n👤 {r['agent_name']}\n🏪 {r.get('shop_name','')}\n💰 Sotuv: {fmt(ts)} so'm | Sof: {fmt(nt)} so'm", parse_mode="HTML")
+            try:
+                bot.send_photo(int(u_id), r["photo_id"], caption=at, parse_mode="HTML")
+                bot.send_location(int(u_id), r["location"]["lat"], r["location"]["lon"])
             except: pass
     sessions.pop(uid, None)
 
