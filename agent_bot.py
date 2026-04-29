@@ -135,7 +135,7 @@ def find_nearby_clients_gps(lat, lon, radius=100):
     # 2. clients.json — qo'lda kiritilgan klientlar
     for c in load_clients():
         clat = c.get("lat")
-        clng = c.get("lon")
+        clng = c.get("lng") or c.get("lon")
         if clat and clng:
             dist = haversine(lat, lon, clat, clng)
             if dist <= radius:
