@@ -5,7 +5,7 @@
 import telebot
 from telebot import types
 from datetime import datetime, date, timedelta
-import json, os, time, math
+import json, os, time, math, threading, tempfile
 
 # =============================================
 BOT_TOKEN = "8663649354:AAGDw8eBwEVb5ck7yEbb4hX6Ya3cCZAUxMY"
@@ -186,7 +186,8 @@ def admin_kb():
     kb.add("📊 Hisobotlar", "👥 Foydalanuvchilar")
     kb.add("💰 Sotuv statistikasi", "🏆 Reyting")
     kb.add("🏪 Magazinlar", "👥 Mijozlar")
-    kb.add("⏳ Kutayotganlar")
+    kb.add("⏳ Kutayotganlar", "🔄 Hammasini restart")
+    kb.add("📤 Kunlik hisobot")
     return kb
 
 def back_kb():
@@ -1233,5 +1234,172 @@ def pending_list(msg):
         kb.add(types.InlineKeyboardButton("✅",callback_data=f"approve_{u_id}_{p['role']}"),types.InlineKeyboardButton("❌",callback_data=f"reject_{u_id}"))
         bot.send_message(ADMIN_ID,f"⏳ {p['name']}\n🆔 {u_id}\n🎭 {ROLES.get(p['role'],'')}",parse_mode="HTML",reply_markup=kb)
 
+# =============================================
+# 📅 KUN YAKUNIY HTML HISOBOT (00:00 da avtomatik)
+# =============================================
+def gen_daily_html(target_date: str) -> str:
+    d = load()
+    reps = [r for r in d["reports"] if r.get("date", r.get("started","")[:10]) == target_date]
+    agents = {}
+    for r in reps:
+        an = r.get("agent_name","Noma'lum")
+        agents.setdefault(an, []).append(r)
+    total_sale = sum(r.get("total_sale",0) for r in reps)
+    total_vozv = sum(r.get("total_vozv",0) for r in reps)
+    net_total  = sum(r.get("net_total", 0) for r in reps)
+    agent_rows = ""
+    for agent_name, visits in agents.items():
+        a_sale = sum(v.get("total_sale",0) for v in visits)
+        a_vozv = sum(v.get("total_vozv",0) for v in visits)
+        a_net  = sum(v.get("net_total", 0) for v in visits)
+        vrows = ""
+        for i, v in enumerate(visits, 1):
+            prods = [f"{PRODUCTS[int(idx)]['name']}: {qty} ta ({fmt(qty*PRODUCTS[int(idx)]['price'])} so'm)"
+                     for idx,qty in v.get("product_counts",{}).items() if qty>0]
+            vozv  = [f"{PRODUCTS[int(idx)]['name']}: {qty} ta"
+                     for idx,qty in v.get("vozvrat_counts",{}).items() if qty>0]
+            t1 = v.get("started","")[:16]; t2 = v.get("finished","")[:16]
+            tstr = f"{t1} → {t2}" if t2 else t1
+            vrows += f"""<tr>
+              <td class="num">{i}</td>
+              <td><b>{v.get('shop_name','—')}</b></td>
+              <td class="center">{tstr}</td>
+              <td>{"<br>".join(prods) or "—"}</td>
+              <td class="red">{"<br>".join(vozv) or "—"}</td>
+              <td class="money">{fmt(v.get('total_sale',0))}</td>
+              <td class="money red">{fmt(v.get('total_vozv',0))}</td>
+              <td class="money green">{fmt(v.get('net_total',0))}</td>
+            </tr>"""
+        agent_rows += f"""<div class="agent-block">
+          <div class="agent-header">👤 {agent_name}
+            <span class="badge">{len(visits)} visit</span>
+            <span class="badge green">{fmt(a_net)} so'm</span>
+          </div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>#</th><th>Mijoz/Magazin</th><th>Vaqt</th>
+              <th>Sotuv</th><th>Vozvrat</th>
+              <th>Sotuv ₸</th><th>Vozvrat ₸</th><th>Sof ₸</th></tr></thead>
+            <tbody>{vrows}</tbody>
+            <tfoot><tr><td colspan="5" class="right"><b>JAMI:</b></td>
+              <td class="money"><b>{fmt(a_sale)}</b></td>
+              <td class="money red"><b>{fmt(a_vozv)}</b></td>
+              <td class="money green"><b>{fmt(a_net)}</b></td></tr></tfoot>
+          </table></div></div>"""
+    if not agent_rows:
+        agent_rows = '<div class="empty">📭 Bu kun hech qanday hisobot yo\'q.</div>'
+    return f"""<!DOCTYPE html><html lang="uz"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hisobot {target_date}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:'Segoe UI',sans-serif;background:#f0f2f5;color:#1a1a2e}}
+.header{{background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;padding:24px;text-align:center}}
+.header h1{{font-size:22px;margin-bottom:4px}}
+.header p{{font-size:13px;opacity:.7}}
+.summary{{display:flex;gap:12px;padding:16px;flex-wrap:wrap}}
+.card{{flex:1;min-width:130px;background:#fff;border-radius:12px;padding:14px 18px;box-shadow:0 2px 8px rgba(0,0,0,.08);text-align:center}}
+.card .val{{font-size:20px;font-weight:700;margin-bottom:4px}}
+.card .lbl{{font-size:11px;color:#888;text-transform:uppercase}}
+.card.green .val{{color:#27ae60}}.card.red .val{{color:#e74c3c}}.card.blue .val{{color:#2980b9}}
+.content{{padding:0 16px 24px}}
+.agent-block{{background:#fff;border-radius:14px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,.07);overflow:hidden}}
+.agent-header{{background:#16213e;color:#fff;padding:12px 18px;font-size:15px;font-weight:600;display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
+.badge{{background:rgba(255,255,255,.2);border-radius:20px;padding:2px 10px;font-size:12px}}
+.badge.green{{background:#27ae60}}
+.tbl-wrap{{overflow-x:auto}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+thead tr{{background:#f8f9fa}}
+th{{padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:#666;border-bottom:2px solid #eee}}
+td{{padding:10px 12px;border-bottom:1px solid #f0f0f0;vertical-align:top}}
+tfoot td{{background:#f8f9fa;border-top:2px solid #dee2e6}}
+.num{{color:#aaa;font-size:12px;width:30px}}.center{{text-align:center;white-space:nowrap;color:#666}}
+.right{{text-align:right}}.money{{text-align:right;white-space:nowrap;font-weight:600}}
+.green{{color:#27ae60}}.red{{color:#e74c3c}}
+.empty{{text-align:center;padding:40px;color:#aaa;font-size:15px}}
+@media(max-width:600px){{.summary{{flex-direction:column}}th,td{{padding:7px 8px;font-size:12px}}}}
+</style></head><body>
+<div class="header"><h1>📊 Kunlik Hisobot</h1><p>{target_date} — Agent nazorati MEHR</p></div>
+<div class="summary">
+  <div class="card blue"><div class="val">{len(reps)}</div><div class="lbl">Jami visit</div></div>
+  <div class="card blue"><div class="val">{len(agents)}</div><div class="lbl">Agentlar</div></div>
+  <div class="card"><div class="val">{fmt(total_sale)}</div><div class="lbl">Sotuv (so'm)</div></div>
+  <div class="card red"><div class="val">{fmt(total_vozv)}</div><div class="lbl">Vozvrat (so'm)</div></div>
+  <div class="card green"><div class="val">{fmt(net_total)}</div><div class="lbl">Sof daromad</div></div>
+</div>
+<div class="content">{agent_rows}</div></body></html>"""
+
+
+def send_daily_report(target_date: str = None):
+    if not target_date:
+        target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    html = gen_daily_html(target_date)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8")
+    tmp.write(html); tmp.close()
+    caption = f"📊 <b>Kunlik hisobot</b> — {target_date}"
+    d = load()
+    recipients = [ADMIN_ID]
+    for u_id, u in d["users"].items():
+        if u.get("role") in ("supervisor","manager") and u.get("approved"):
+            try: recipients.append(int(u_id))
+            except: pass
+    for rec in set(recipients):
+        try:
+            with open(tmp.name,"rb") as f:
+                bot.send_document(rec, f, caption=caption, parse_mode="HTML",
+                                  visible_file_name=f"hisobot_{target_date}.html")
+        except Exception as e:
+            print(f"❌ {rec}: {e}")
+    os.unlink(tmp.name)
+    print(f"✅ Hisobot yuborildi: {target_date}")
+
+
+def midnight_scheduler():
+    while True:
+        now = datetime.now()
+        next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=10, microsecond=0)
+        wait = (next_run - now).total_seconds()
+        print(f"⏳ Keyingi hisobot: {next_run} ({int(wait//3600)}s {int((wait%3600)//60)}m)")
+        time.sleep(wait)
+        send_daily_report()
+
+
+# ─── Admin: qo'lda hisobot olish ───────────────────────────────────────
+@bot.message_handler(func=lambda m: m.text=="📤 Kunlik hisobot" and is_admin(m.from_user.id))
+def manual_daily_report(msg):
+    bot.send_message(msg.from_user.id, "⏳ Hisobot tayyorlanmoqda...")
+    send_daily_report(today_str())
+    bot.send_message(msg.from_user.id, "✅ Bugungi hisobot yuborildi!")
+
+# =============================================
+@bot.message_handler(func=lambda m: m.text=="🔄 Hammasini restart" and is_admin(m.from_user.id))
+def restart_all(msg):
+    uid = msg.from_user.id
+    count = len(sessions)
+    sessions.clear()
+    # Barcha foydalanuvchilarga xabar yuborish
+    d = load()
+    notified = 0
+    for u_id, u in d["users"].items():
+        if str(u_id) == str(ADMIN_ID): continue
+        if u.get("approved"):
+            try:
+                bot.send_message(int(u_id),
+                    "🔄 <b>Tizim qayta ishga tushirildi!</b>\n\n"
+                    "Iltimos, /start bosing.",
+                    parse_mode="HTML")
+                notified += 1
+            except:
+                pass
+    bot.send_message(uid,
+        f"✅ <b>Restart bajarildi!</b>\n\n"
+        f"🗑 Tozalangan sessiyalar: {count} ta\n"
+        f"📨 Xabar yuborildi: {notified} ta xodim",
+        parse_mode="HTML", reply_markup=admin_kb())
+
 print("✅ Bot ishga tushdi...")
+
+# ⏰ Scheduler — alohida thread da ishlaydi
+sched_thread = threading.Thread(target=midnight_scheduler, daemon=True)
+sched_thread.start()
+
 bot.infinity_polling()
