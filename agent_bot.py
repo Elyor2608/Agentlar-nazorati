@@ -362,7 +362,7 @@ def go_back(msg):
         bot.send_message(uid, "↩️", reply_markup=vozvrat_kb(sess["report"].get("vozvrat_counts", {})))
     elif step == "polka_photo":
         sess["step"] = "vozvrat"
-        bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar:", parse_mode="HTML", reply_markup=products_kb(sess["report"].get("vozvrat_counts", {})))
+        bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar:", parse_mode="HTML", reply_markup=vozvrat_kb(sess["report"].get("vozvrat_counts", {})))
     elif step in ("client_menu","client_search","client_add_name","client_add_address","client_add_phone","client_add_location","client_detail"):
         sessions.pop(uid, None)
         kb = admin_kb() if is_admin(uid) else (main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
