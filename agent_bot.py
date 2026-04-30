@@ -384,6 +384,7 @@ def show_client_menu(uid):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔍 Mijoz qidirish", "➕ Yangi mijoz")
     kb.add("📋 Barcha mijozlar")
+    kb.add("📥 Excel import")
     kb.add("⬅️ Orqaga")
     sessions[uid] = {"step": "client_menu"}
     bot.send_message(uid, "👥 <b>Mijozlar bo'limi</b>\n\nTanlang:", parse_mode="HTML", reply_markup=kb)
@@ -405,6 +406,82 @@ def client_menu_handler(msg):
         bot.send_message(uid, "🔍 <b>Mijoz qidirish</b>\n\nMijoz nomi yoki adresini yozing:", parse_mode="HTML", reply_markup=back_kb())
     elif text == "➕ Yangi mijoz":
         start_add_client(uid)
+    elif text == "📥 Excel import":
+        sessions[uid]["step"] = "client_excel_import"
+        bot.send_message(uid,
+            "📥 <b>Excel import</b>\n\n"
+            "Excel (.xlsx) faylini yuboring.\n\n"
+            "📋 <b>Fayl formati:</b>\n"
+            "A ustun: Mijoz nomi\n"
+            "B ustun: Manzil\n"
+            "C ustun: Telefon\n\n"
+            "<i>1-qator sarlavha bo\'lishi mumkin — avtomatik o\'tkaziladi</i>",
+            parse_mode="HTML", reply_markup=back_kb())
+
+
+# --- Excel import ---
+@bot.message_handler(content_types=["document"], func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "client_excel_import")
+def client_excel_import(msg):
+    uid = msg.from_user.id
+    if not msg.document:
+        return bot.send_message(uid, "⚠️ Fayl yuboring!")
+    fname = msg.document.file_name or ""
+    if not fname.endswith(".xlsx"):
+        return bot.send_message(uid, "❌ Faqat .xlsx fayl qabul qilinadi!")
+    bot.send_message(uid, "⏳ Fayl o'qilmoqda...")
+    try:
+        import tempfile, openpyxl
+        file_info = bot.get_file(msg.document.file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        tmp.write(file_bytes); tmp.close()
+        wb = openpyxl.load_workbook(tmp.name)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        os.unlink(tmp.name)
+        # 1-qator sarlavhami tekshir
+        start_row = 0
+        if rows and rows[0]:
+            first = str(rows[0][0] or "").lower()
+            if any(w in first for w in ["nom", "name", "mijoz", "client"]):
+                start_row = 1
+        clients = load_clients()
+        existing_names = {c.get("name","").lower() for c in clients}
+        added, skipped = 0, 0
+        for row in rows[start_row:]:
+            if not row or not row[0]: continue
+            name    = str(row[0]).strip() if row[0] else ""
+            address = str(row[1]).strip() if len(row) > 1 and row[1] else "—"
+            phone   = str(row[2]).strip() if len(row) > 2 and row[2] else "—"
+            if not name: continue
+            if name.lower() in existing_names:
+                skipped += 1; continue
+            client = {
+                "id": len(clients) + 1,
+                "name": name,
+                "address": address,
+                "phone": phone,
+                "lat": None,
+                "lon": None,
+                "created": now_str(),
+                "source": "excel"
+            }
+            clients.append(client)
+            existing_names.add(name.lower())
+            added += 1
+        save_clients(clients)
+        sessions[uid]["step"] = "client_menu"
+        bot.send_message(uid,
+            f"✅ <b>Import yakunlandi!</b>\n\n"
+            f"➕ Qo\'shildi: <b>{added} ta</b>\n"
+            f"⏭ O\'tkazildi (avval bor): <b>{skipped} ta</b>\n"
+            f"📋 Jami mijozlar: <b>{len(clients)} ta</b>",
+            parse_mode="HTML")
+        show_client_menu(uid)
+    except Exception as e:
+        print(f"❌ Excel import xato: {e}")
+        bot.send_message(uid, f"❌ Xatolik: <code>{e}</code>\n\nFayl formatini tekshiring.", parse_mode="HTML")
+        show_client_menu(uid)
 
 # --- Barcha mijozlar ---
 def show_all_clients(uid, page=0):
