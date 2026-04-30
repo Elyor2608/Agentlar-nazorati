@@ -212,26 +212,21 @@ def products_kb(counts):
         cnt = counts.get(str(i), 0)
         label = f"{p['name']} [{cnt} ta]" if cnt > 0 else p['name']
         kb.add(label)
-    kb.add("✅ Tayyor", "⬅️ Orqaga")
+    kb.add("✅ Tayyor")
+    kb.add("⬅️ Orqaga")
     return kb
 
 def qty_numpad_kb():
-    """Sotuv uchun oddiy raqamli klavyatura (yashil)"""
+    """Sotuv uchun raqamli klavyatura — faqat tasdiqlash va orqaga"""
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("1", "2", "3")
-    kb.row("4", "5", "6")
-    kb.row("7", "8", "9")
-    kb.row("✅ Tasdiqlash", "0", "🔙")
+    kb.add("✅ Tasdiqlash")
     kb.add("⬅️ Orqaga")
     return kb
 
 def qty_numpad_vozv_kb():
-    """Vozvrat uchun raqamli klavyatura (qizil belgili)"""
+    """Vozvrat uchun raqamli klavyatura — faqat tasdiqlash va orqaga"""
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("1", "2", "3")
-    kb.row("4", "5", "6")
-    kb.row("7", "8", "9")
-    kb.row("✅ Tasdiqlash", "0", "🔙")
+    kb.add("✅ Tasdiqlash")
     kb.add("⬅️ Orqaga")
     return kb
 
@@ -242,7 +237,8 @@ def vozvrat_kb(counts):
         cnt = counts.get(str(i), 0)
         label = f"🔴 {p['name']} [{cnt} ta]" if cnt > 0 else f"🔴 {p['name']}"
         kb.add(label)
-    kb.add("✅ Tayyor", "⬅️ Orqaga")
+    kb.add("✅ Tayyor")
+    kb.add("⬅️ Orqaga")
     return kb
 
 # =============================================
@@ -818,7 +814,7 @@ def select_product(msg):
         cnt = sess["report"]["product_counts"].get(str(i), 0)
         label_with_cnt = f"{p['name']} [{cnt} ta]"
         # Ikki variantni ham tekshiramiz: sof nom va sonli nom
-        if text == p['name'] or text == label_with_cnt or text.startswith(p['name']):
+        if text == p['name'] or text == label_with_cnt:
             sess["step"] = "qty_sale"
             sess["selected_product"] = i
             sess["qty_input"] = ""
@@ -875,7 +871,7 @@ def select_vozvrat(msg):
     for i, p in enumerate(PRODUCTS):
         cnt = sess["report"]["vozvrat_counts"].get(str(i), 0)
         label_with_cnt = f"{p['name']} [{cnt} ta]"
-        if clean_text == p['name'] or clean_text == label_with_cnt or clean_text.startswith(p['name']):
+        if clean_text == p['name'] or clean_text == label_with_cnt:
             sess["step"] = "qty_vozvrat"
             sess["selected_product"] = i
             sess["qty_input"] = ""
