@@ -341,7 +341,8 @@ def go_back(msg):
     step = sess.get("step", "")
     if step in ("location", "shop_select", "new_shop", "client_select"):
         sessions.pop(uid, None)
-        bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=main_kb(user["role"]))
+        kb = admin_kb() if is_admin(uid) else (main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
+        bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=kb)
     elif step == "photo":
         sess["step"] = "location"
         bot.send_message(uid, "📍 <b>1-qadam: Lokatsiya</b>", parse_mode="HTML", reply_markup=location_kb())
@@ -364,11 +365,11 @@ def go_back(msg):
         bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar:", parse_mode="HTML", reply_markup=products_kb(sess["report"].get("vozvrat_counts", {})))
     elif step in ("client_menu","client_search","client_add_name","client_add_address","client_add_phone","client_add_location","client_detail"):
         sessions.pop(uid, None)
-        kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
+        kb = admin_kb() if is_admin(uid) else (main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
         bot.send_message(uid, "↩️", reply_markup=kb)
     elif step in ("my_report_menu","admin_report_menu","pick_agent","admin_date_from","admin_date_to","my_date_from","my_date_to","pick_product","pick_shop"):
         sessions.pop(uid, None)
-        kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
+        kb = admin_kb() if is_admin(uid) else (main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
         bot.send_message(uid, "↩️", reply_markup=kb)
 
 # =============================================
@@ -377,6 +378,8 @@ def go_back(msg):
 @bot.message_handler(func=lambda m: m.text == "👥 Mijozlar")
 def clients_main(msg):
     uid = msg.from_user.id
+    if is_admin(uid):
+        return show_client_menu(uid)
     user = get_user(uid)
     if not user or not user.get("approved"): return bot.send_message(uid, "❌ Ruxsat yo'q.")
     show_client_menu(uid)
@@ -394,8 +397,10 @@ def client_menu_handler(msg):
     uid, text = msg.from_user.id, msg.text
     if text == "⬅️ Orqaga":
         sessions.pop(uid, None)
+        if is_admin(uid):
+            return bot.send_message(uid, "↩️", reply_markup=admin_kb())
         user = get_user(uid)
-        kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
+        kb = main_kb(user["role"]) if user else types.ReplyKeyboardRemove()
         return bot.send_message(uid, "↩️", reply_markup=kb)
     elif text == "📋 Barcha mijozlar":
         show_all_clients(uid)
@@ -670,7 +675,8 @@ def select_client(msg):
     if text == "⬅️ Orqaga":
         sessions.pop(uid, None)
         user = get_user(uid)
-        return bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=main_kb(user["role"]))
+        kb = admin_kb() if is_admin(uid) else (main_kb(user["role"]) if user else types.ReplyKeyboardRemove())
+        return bot.send_message(uid, "↩️ Bekor qilindi.", reply_markup=kb)
 
     if text == "➕ Yangi mijoz":
         nearby_shops = sess.get("nearby_shops", [])
@@ -914,7 +920,8 @@ def receive_polka_photo(msg):
         finish_report(uid)
     except Exception as e:
         print(f"❌ finish_report xatosi: {e}")
-        bot.send_message(uid, "⚠️ Texnik xato yuz berdi. Admin bilan bog'laning.", reply_markup=main_kb(get_user(uid)["role"]))
+        u = get_user(uid)
+        bot.send_message(uid, "⚠️ Texnik xato yuz berdi. Admin bilan bog'laning.", reply_markup=main_kb(u["role"]) if u else types.ReplyKeyboardRemove())
         sessions.pop(uid, None)
 
 def auto_save_client_from_report(r):
@@ -932,7 +939,7 @@ def auto_save_client_from_report(r):
     client = {
         "id": len(clients) + 1,
         "name": shop_name,
-        "address": r.get("shop_name", ""),
+        "address": "—",
         "phone": "—",
         "lat": lat,
         "lon": lon,
@@ -1239,7 +1246,7 @@ def my_reports(msg):
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step")=="my_report_menu")
 def my_rep(msg):
     uid,us=msg.from_user.id,get_user(msg.from_user.id); tx=msg.text; ai=sessions[uid].get("agent_filter",uid)
-    if tx=="⬅️ Orqaga": sessions.pop(uid,None); return bot.send_message(uid,"↩️",reply_markup=main_kb(us["role"]))
+    if tx=="⬅️ Orqaga": sessions.pop(uid,None); return bot.send_message(uid,"↩️",reply_markup=main_kb(us["role"]) if us else types.ReplyKeyboardRemove())
     if tx=="📅 Bugun": reps=get_reports_by_period(today_str(),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bugun"),parse_mode="HTML")
     elif tx=="📆 Bu oy": reps=get_reports_by_period(datetime.now(UZ_TZ).strftime("%Y-%m-01"),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bu oy"),parse_mode="HTML")
     elif tx=="📤 Excel yuklash": reps=get_reports_by_period("2000-01-01",today_str(),ai); p=gen_excel(reps); bot.send_document(uid,open(p,"rb"),caption=f"📤 Hisobot Excel | {len(reps)} ta yozuv")
@@ -1248,7 +1255,10 @@ def my_rep(msg):
     elif tx=="📋 Batafsil hisobot": reps=get_reports_by_period("2000-01-01",today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Barcha hisobotlarim"),parse_mode="HTML")
     elif tx=="🗓 Sana oralig'i": sessions[uid]["step"]="my_date_from"; bot.send_message(uid,"Boshlanish sanasi:\n<i>2026-04-01</i>",parse_mode="HTML",reply_markup=back_kb())
 
-def is_mgr(uid): return is_admin(uid) or get_user(uid).get("role") in ("supervisor","manager")
+def is_mgr(uid):
+    if is_admin(uid): return True
+    u = get_user(uid)
+    return bool(u and u.get("role") in ("supervisor","manager") and u.get("approved"))
 
 @bot.message_handler(func=lambda m: m.text=="📊 Hisobotlar" and is_mgr(m.from_user.id))
 def admin_reports(msg):
@@ -1257,7 +1267,7 @@ def admin_reports(msg):
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id,{}).get("step")=="admin_report_menu")
 def adm_rep(msg):
     uid=msg.from_user.id; us=get_user(uid); tx=msg.text; ai=sessions[uid].get("agent_filter")
-    rl="admin" if is_admin(uid) else us["role"]
+    rl="admin" if is_admin(uid) else (us["role"] if us else "agent")
     if tx=="⬅️ Orqaga": sessions.pop(uid,None); return bot.send_message(uid,"↩️",reply_markup=admin_kb() if is_admin(uid) else main_kb(rl))
     if tx=="📅 Bugun": reps=get_reports_by_period(today_str(),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bugun"),parse_mode="HTML")
     elif tx=="📆 Bu oy": reps=get_reports_by_period(datetime.now(UZ_TZ).strftime("%Y-%m-01"),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bu oy"),parse_mode="HTML")
