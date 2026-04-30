@@ -384,7 +384,7 @@ def show_client_menu(uid):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔍 Mijoz qidirish", "➕ Yangi mijoz")
     kb.add("📋 Barcha mijozlar")
-    kb.add("📥 Excel import")
+    kb.add("📥 Excel import", "📤 Excel export")
     kb.add("⬅️ Orqaga")
     sessions[uid] = {"step": "client_menu"}
     bot.send_message(uid, "👥 <b>Mijozlar bo'limi</b>\n\nTanlang:", parse_mode="HTML", reply_markup=kb)
@@ -406,6 +406,8 @@ def client_menu_handler(msg):
         bot.send_message(uid, "🔍 <b>Mijoz qidirish</b>\n\nMijoz nomi yoki adresini yozing:", parse_mode="HTML", reply_markup=back_kb())
     elif text == "➕ Yangi mijoz":
         start_add_client(uid)
+    elif text == "📤 Excel export":
+        export_clients_excel(uid)
     elif text == "📥 Excel import":
         sessions[uid]["step"] = "client_excel_import"
         bot.send_message(uid,
@@ -426,24 +428,24 @@ def client_excel_import(msg):
     if not msg.document:
         return bot.send_message(uid, "⚠️ Fayl yuboring!")
     fname = msg.document.file_name or ""
-    if not fname.endswith(".xlsx"):
+    if not fname.lower().endswith(".xlsx"):
         return bot.send_message(uid, "❌ Faqat .xlsx fayl qabul qilinadi!")
-    bot.send_message(uid, "⏳ Fayl o'qilmoqda...")
+    bot.send_message(uid, "⏳ Fayl o\'qilmoqda, kuting...")
     try:
         import tempfile, openpyxl
         file_info = bot.get_file(msg.document.file_id)
         file_bytes = bot.download_file(file_info.file_path)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         tmp.write(file_bytes); tmp.close()
-        wb = openpyxl.load_workbook(tmp.name)
+        wb = openpyxl.load_workbook(tmp.name, read_only=True)
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
-        os.unlink(tmp.name)
-        # 1-qator sarlavhami tekshir
+        wb.close(); os.unlink(tmp.name)
+        # 1-qator sarlavhami tekshir (Клиент, nom, name, mijoz)
         start_row = 0
-        if rows and rows[0]:
-            first = str(rows[0][0] or "").lower()
-            if any(w in first for w in ["nom", "name", "mijoz", "client"]):
+        if rows and rows[0] and rows[0][0]:
+            first = str(rows[0][0]).lower()
+            if any(w in first for w in ["клиент", "client", "nom", "name", "mijoz", "кли"]):
                 start_row = 1
         clients = load_clients()
         existing_names = {c.get("name","").lower() for c in clients}
@@ -452,7 +454,12 @@ def client_excel_import(msg):
             if not row or not row[0]: continue
             name    = str(row[0]).strip() if row[0] else ""
             address = str(row[1]).strip() if len(row) > 1 and row[1] else "—"
-            phone   = str(row[2]).strip() if len(row) > 2 and row[2] else "—"
+            # Lat/Lon — C va D ustunlar (string yoki float)
+            try:
+                lat = float(str(row[2]).strip()) if len(row) > 2 and row[2] else None
+                lon = float(str(row[3]).strip()) if len(row) > 3 and row[3] else None
+            except:
+                lat, lon = None, None
             if not name: continue
             if name.lower() in existing_names:
                 skipped += 1; continue
@@ -460,9 +467,9 @@ def client_excel_import(msg):
                 "id": len(clients) + 1,
                 "name": name,
                 "address": address,
-                "phone": phone,
-                "lat": None,
-                "lon": None,
+                "phone": "—",
+                "lat": lat,
+                "lon": lon,
                 "created": now_str(),
                 "source": "excel"
             }
@@ -471,10 +478,12 @@ def client_excel_import(msg):
             added += 1
         save_clients(clients)
         sessions[uid]["step"] = "client_menu"
+        with_loc = sum(1 for c in clients if c.get("lat"))
         bot.send_message(uid,
             f"✅ <b>Import yakunlandi!</b>\n\n"
             f"➕ Qo\'shildi: <b>{added} ta</b>\n"
             f"⏭ O\'tkazildi (avval bor): <b>{skipped} ta</b>\n"
+            f"📍 Lokatsiyali: <b>{with_loc} ta</b>\n"
             f"📋 Jami mijozlar: <b>{len(clients)} ta</b>",
             parse_mode="HTML")
         show_client_menu(uid)
@@ -483,28 +492,90 @@ def client_excel_import(msg):
         bot.send_message(uid, f"❌ Xatolik: <code>{e}</code>\n\nFayl formatini tekshiring.", parse_mode="HTML")
         show_client_menu(uid)
 
+
+# --- Excel export ---
+def export_clients_excel(uid):
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        clients = load_clients()
+        if not clients:
+            return bot.send_message(uid, "👥 Hali mijoz yo'q — eksport qilish uchun avval mijoz qo'shing!")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Mijozlar"
+        # Sarlavha
+        headers = ["№", "Mijoz nomi", "Manzil", "Telefon", "Latitude", "Longitude", "Qo'shilgan", "Manba"]
+        ws.append(headers)
+        # Sarlavha uslubi
+        for cell in ws[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="2E86AB")
+            cell.alignment = Alignment(horizontal="center")
+        # Ustun kengliklari
+        widths = [5, 35, 30, 18, 15, 15, 20, 12]
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+        # Ma'lumotlar
+        for c in clients:
+            ws.append([
+                c.get("id", ""),
+                c.get("name", ""),
+                c.get("address", "—"),
+                c.get("phone", "—"),
+                c.get("lat", ""),
+                c.get("lon", ""),
+                c.get("created", ""),
+                c.get("source", "qo'lda"),
+            ])
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        wb.save(tmp.name); tmp.close()
+        bot.send_message(uid, f"⏳ {len(clients)} ta mijoz eksport qilinmoqda...")
+        with open(tmp.name, "rb") as f:
+            bot.send_document(uid, f, caption=f"📤 <b>Mijozlar ro'yxati</b>\n📋 Jami: <b>{len(clients)} ta</b>\n📅 {today_str()}", parse_mode="HTML", visible_file_name=f"mijozlar_{today_str()}.xlsx")
+        os.unlink(tmp.name)
+    except Exception as e:
+        print(f"❌ Export xato: {e}")
+        bot.send_message(uid, f"❌ Export xatoligi: <code>{e}</code>", parse_mode="HTML")
+
 # --- Barcha mijozlar ---
 def show_all_clients(uid, page=0):
     clients = load_clients()
-    if not clients: return bot.send_message(uid, "👥 Hali mijoz yo'q.\n➕ Yangi mijoz qo'shing!")
-    per_page = 10; total = len(clients); pages = (total + per_page - 1) // per_page
+    if not clients: return bot.send_message(uid, "👥 Hali mijoz yo\'q.\n➕ Yangi mijoz qo\'shing!")
+    per_page = 10; total = len(clients)
     start, end = page * per_page, min((page + 1) * per_page, total)
-    text = f"👥 <b>Mijozlar</b> ({start+1}-{end} / {total})\n\n"
+    lines = []
     for c in clients[start:end]:
-        text += f"  🆔 {c['id']}. <b>{c['name']}</b>\n"
-        text += f"     📍 {c.get('address','—')}\n"
-        text += f"     📞 {c.get('phone','—')}\n\n"
-    kb = types.InlineKeyboardMarkup()
-    if page > 0: kb.add(types.InlineKeyboardButton("◀️ Oldingi", callback_data=f"clients_page_{page-1}"))
-    if end < total: kb.add(types.InlineKeyboardButton("Keyingi ▶️", callback_data=f"clients_page_{page+1}"))
-    kb.add(types.InlineKeyboardButton("📍 Lokatsiyasini ko'rish", callback_data=f"client_map_select"))
-    bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
+        name = (c.get("name","") or "")[:40]
+        addr = (c.get("address","") or "—")[:30]
+        phone = (c.get("phone","") or "—")[:15]
+        lines.append(f"<b>{c.get('id','')}</b>. {name}\n📍 {addr} | 📞 {phone}")
+    text = f"👥 <b>Mijozlar</b> ({start+1}–{end} / {total})\n\n" + "\n\n".join(lines)
+    # 4096 limitdan oshmasin
+    if len(text) > 4000:
+        text = text[:3990] + "\n..."
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    nav = []
+    if page > 0: nav.append(types.InlineKeyboardButton("◀️ Oldingi", callback_data=f"clients_page_{page-1}"))
+    if end < total: nav.append(types.InlineKeyboardButton("Keyingi ▶️", callback_data=f"clients_page_{page+1}"))
+    if nav: kb.add(*nav)
+    try:
+        bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        print(f"❌ show_all_clients xato: {e}")
+        bot.send_message(uid, f"👥 Mijozlar ({start+1}–{end} / {total})\n\n" + "\n".join([c.get("name","") for c in clients[start:end]]), reply_markup=kb)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("clients_page_"))
 def clients_page(call):
     page = int(call.data.split("_")[2])
     show_all_clients(call.from_user.id, page)
     bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "client_map_select")
+def client_map_select(call):
+    bot.answer_callback_query(call.id, "📍 Lokatsiya funksiyasi ishlab chiqilmoqda")
 
 # --- Qidiruv ---
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "client_search")
@@ -514,11 +585,16 @@ def client_search(msg):
     results = search_clients(query)
     if not results:
         return bot.send_message(uid, f"🔍 <b>'{query}'</b> bo'yicha hech narsa topilmadi.\n\nBoshqa nom yozing:", parse_mode="HTML", reply_markup=back_kb())
-    text = f"🔍 <b>'{query}'</b> bo'yicha natijalar: <b>{len(results)} ta</b>\n\n"
-    for c in results:
-        text += f"  🆔 {c['id']}. <b>{c['name']}</b>\n"
-        text += f"     📍 {c.get('address','—')}\n"
-        text += f"     📞 {c.get('phone','—')}\n\n"
+    # Ko'p natija bo'lsa faqat birinchi 20 tasini ko'rsat
+    show_results = results[:20]
+    lines = []
+    for c in show_results:
+        name = (c.get("name","") or "")[:40]
+        addr = (c.get("address","") or "—")[:30]
+        lines.append(f"<b>{c.get('id','')}</b>. {name}\n📍 {addr}")
+    more = f"\n\n<i>...va yana {len(results)-20} ta natija. Aniqroq qidiring.</i>" if len(results) > 20 else ""
+    text = f"🔍 <b>\'{query}\'</b> — <b>{len(results)} ta</b>\n\n" + "\n\n".join(lines) + more
+    if len(text) > 4000: text = text[:3990] + "\n..."
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔍 Boshqa qidirish")
     if any(c.get("lat") for c in results):
