@@ -4,8 +4,13 @@
 
 import telebot
 from telebot import types
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import json, os, time, math, threading, tempfile
+
+# =============================================
+# 🌏 O'ZBEKISTON VAQTI (UTC+5)
+# =============================================
+UZ_TZ = timezone(timedelta(hours=5))
 
 # =============================================
 BOT_TOKEN = "8663649354:AAGDw8eBwEVb5ck7yEbb4hX6Ya3cCZAUxMY"
@@ -75,10 +80,10 @@ def is_admin(uid):
     return uid == ADMIN_ID
 
 def now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    return datetime.now(UZ_TZ).strftime("%Y-%m-%d %H:%M")
 
 def today_str():
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now(UZ_TZ).strftime("%Y-%m-%d")
 
 def fmt(n):
     return f"{n:,}".replace(",", " ")
@@ -211,12 +216,33 @@ def products_kb(counts):
     return kb
 
 def qty_numpad_kb():
+    """Sotuv uchun oddiy raqamli klavyatura (yashil)"""
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("1️⃣", "2️⃣", "3️⃣")
-    kb.row("4️⃣", "5️⃣", "6️⃣")
-    kb.row("7️⃣", "8️⃣", "9️⃣")
-    kb.row("✅ Tasdiqlash", "0️⃣", "🔙")
+    kb.row("1", "2", "3")
+    kb.row("4", "5", "6")
+    kb.row("7", "8", "9")
+    kb.row("✅ Tasdiqlash", "0", "🔙")
     kb.add("⬅️ Orqaga")
+    return kb
+
+def qty_numpad_vozv_kb():
+    """Vozvrat uchun raqamli klavyatura (qizil belgili)"""
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("1", "2", "3")
+    kb.row("4", "5", "6")
+    kb.row("7", "8", "9")
+    kb.row("✅ Tasdiqlash", "0", "🔙")
+    kb.add("⬅️ Orqaga")
+    return kb
+
+def vozvrat_kb(counts):
+    """Vozvrat uchun qizil belgili mahsulotlar paneli"""
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for i, p in enumerate(PRODUCTS):
+        cnt = counts.get(str(i), 0)
+        label = f"🔴 {p['name']} [{cnt} ta]" if cnt > 0 else f"🔴 {p['name']}"
+        kb.add(label)
+    kb.add("✅ Tayyor", "⬅️ Orqaga")
     return kb
 
 # =============================================
@@ -325,6 +351,17 @@ def go_back(msg):
     elif step == "vozvrat":
         sess["step"] = "products"
         bot.send_message(uid, "📦 <b>3-qadam: Mahsulotlar</b>", parse_mode="HTML", reply_markup=products_kb(sess["report"].get("product_counts", {})))
+    elif step == "qty_sale":
+        sess.pop("qty_input", None)
+        sess["step"] = "products"
+        bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"].get("product_counts", {})))
+    elif step == "qty_vozvrat":
+        sess.pop("qty_input", None)
+        sess["step"] = "vozvrat"
+        bot.send_message(uid, "↩️", reply_markup=vozvrat_kb(sess["report"].get("vozvrat_counts", {})))
+    elif step == "polka_photo":
+        sess["step"] = "vozvrat"
+        bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar:", parse_mode="HTML", reply_markup=products_kb(sess["report"].get("vozvrat_counts", {})))
     elif step in ("client_menu","client_search","client_add_name","client_add_address","client_add_phone","client_add_location","client_detail"):
         sessions.pop(uid, None)
         kb = admin_kb() if is_admin(uid) else main_kb(user["role"])
@@ -569,7 +606,25 @@ def start_visit(msg):
 @bot.message_handler(content_types=["location"])
 def receive_location(msg):
     uid = msg.from_user.id; sess = sessions.get(uid)
-    if not sess or sess["step"] != "location": return
+    if not sess: return
+
+    # --- Mijoz lokatsiyasi qo'shish ---
+    if sess.get("step") == "client_add_location":
+        nc = sess.get("new_client", {})
+        client = add_client(nc.get("name",""), nc.get("address",""), nc.get("phone",""),
+                            msg.location.latitude, msg.location.longitude)
+        sessions.pop(uid, None)
+        bot.send_location(uid, client["lat"], client["lon"])
+        bot.send_message(uid,
+            f"✅ Mijoz lokatsiya bilan saqlandi!\n\n"
+            f"👤 <b>{client['name']}</b>\n"
+            f"📍 {client['address']}\n"
+            f"📞 {client['phone']}",
+            parse_mode="HTML")
+        return show_client_menu(uid)
+
+    # --- Savdo lokatsiyasi ---
+    if sess.get("step") != "location": return
     lat, lon = msg.location.latitude, msg.location.longitude
     sess["report"]["location"] = {"lat": lat, "lon": lon}
 
@@ -745,7 +800,11 @@ def select_product(msg):
             return bot.send_message(uid, "⚠️ Kamida 1 ta mahsulot tanlang!")
         sess["step"] = "vozvrat"
         sess["report"]["vozvrat_counts"] = {}
-        return bot.send_message(uid, "🔄 <b>4-qadam: Vozvratlar</b>\n\nQaytarilgan mahsulotlar. Yo'q bo'lsa ✅ Tayyor bosing:", parse_mode="HTML", reply_markup=products_kb({}))
+        return bot.send_message(uid,
+            "🔴 <b>4-qadam: Vozvratlar</b>\n\n"
+            "Qaytarilgan mahsulotlarni belgilang.\n"
+            "Vozvrat yo'q bo'lsa ✅ Tayyor bosing:",
+            parse_mode="HTML", reply_markup=vozvrat_kb({}))
     if text == "⬅️ Orqaga":
         return  # go_back handler hal qiladi
     # Mahsulot tanlov — indeks bo'yicha xavfsiz moslashtirish
@@ -773,9 +832,8 @@ def receive_qty_sale(msg):
     if not sess: return
     text = (msg.text or "").strip()
     idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
-    nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
-    if text in nm:
-        cur = sess.get("qty_input","") + nm[text]; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
+    if text.isdigit():
+        cur = sess.get("qty_input","") + text; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
         sess["qty_input"] = cur; qty = int(cur)
         bot.send_message(uid, f"📦 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta" + (f"\nJami: <b>{fmt(qty*p['price'])} so'm</b>" if qty>0 else ""), parse_mode="HTML", reply_markup=qty_numpad_kb())
     elif text == "🔙":
@@ -788,7 +846,7 @@ def receive_qty_sale(msg):
         sess["step"] = "products"
         bot.send_message(uid, f"✅ <b>{p['name']}</b> — {qty} ta" + (f" ({fmt(qty*p['price'])} so'm)" if qty>0 else ""), parse_mode="HTML", reply_markup=products_kb(sess["report"]["product_counts"]))
     elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="products"; bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["product_counts"]))
-    else: bot.send_message(uid, "⚠️ Tugmalardan foydalaning!")
+    else: bot.send_message(uid, "⚠️ Raqamlardan foydalaning!")
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "vozvrat")
 def select_vozvrat(msg):
@@ -796,6 +854,8 @@ def select_vozvrat(msg):
     sess = sessions.get(uid)
     if not sess: return
     text = (msg.text or "").strip()
+    # 🔴 prefixini olib tashlash
+    clean_text = text.replace("🔴 ", "")
     if text == "✅ Tayyor":
         sess["report"]["expired"] = []
         # 5-qadam: polka foto
@@ -809,17 +869,17 @@ def select_vozvrat(msg):
     for i, p in enumerate(PRODUCTS):
         cnt = sess["report"]["vozvrat_counts"].get(str(i), 0)
         label_with_cnt = f"{p['name']} [{cnt} ta]"
-        if text == p['name'] or text == label_with_cnt or text.startswith(p['name']):
+        if clean_text == p['name'] or clean_text == label_with_cnt or clean_text.startswith(p['name']):
             sess["step"] = "qty_vozvrat"
             sess["selected_product"] = i
             sess["qty_input"] = ""
             cur_qty = sess["report"]["vozvrat_counts"].get(str(i), 0)
             msg_text = (
-                f"🔄 <b>{p['name']}</b>\n"
+                f"🔴 <b>Vozvrat: {p['name']}</b>\n"
                 + (f"Joriy vozvrat: <b>{cur_qty} ta</b>\n" if cur_qty > 0 else "")
                 + "\nYangi soni:"
             )
-            return bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=qty_numpad_kb())
+            return bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=qty_numpad_vozv_kb())
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "qty_vozvrat")
 def receive_qty_vozvrat(msg):
@@ -828,20 +888,19 @@ def receive_qty_vozvrat(msg):
     if not sess: return
     text = (msg.text or "").strip()
     idx, p = sess["selected_product"], PRODUCTS[sess["selected_product"]]
-    nm = {"1️⃣":"1","2️⃣":"2","3️⃣":"3","4️⃣":"4","5️⃣":"5","6️⃣":"6","7️⃣":"7","8️⃣":"8","9️⃣":"9","0️⃣":"0"}
-    if text in nm:
-        cur = sess.get("qty_input","")+nm[text]; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
-        sess["qty_input"] = cur; bot.send_message(uid, f"🔄 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_kb())
+    if text.isdigit():
+        cur = sess.get("qty_input","")+text; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
+        sess["qty_input"] = cur; bot.send_message(uid, f"🔴 <b>Vozvrat: {p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_vozv_kb())
     elif text == "🔙":
         cur = sess.get("qty_input",""); cur = cur[:-1] if len(cur)>1 else "0"; sess["qty_input"]=cur
-        bot.send_message(uid, f"🔄 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_kb())
+        bot.send_message(uid, f"🔴 <b>Vozvrat: {p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_vozv_kb())
     elif text == "✅ Tasdiqlash":
         qty = int(sess.get("qty_input","0")); sess.pop("qty_input",None)
         if qty>0: sess["report"]["vozvrat_counts"][str(idx)] = qty
         else: sess["report"]["vozvrat_counts"].pop(str(idx), None)
-        sess["step"]="vozvrat"; bot.send_message(uid, f"✅ <b>{p['name']}</b> vozvrat — {qty} ta", parse_mode="HTML", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
-    elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="vozvrat"; bot.send_message(uid, "↩️", reply_markup=products_kb(sess["report"]["vozvrat_counts"]))
-    else: bot.send_message(uid, "⚠️ Tugmalardan foydalaning!")
+        sess["step"]="vozvrat"; bot.send_message(uid, f"🔴 <b>{p['name']}</b> vozvrat — {qty} ta", parse_mode="HTML", reply_markup=vozvrat_kb(sess["report"]["vozvrat_counts"]))
+    elif text == "⬅️ Orqaga": sess.pop("qty_input",None); sess["step"]="vozvrat"; bot.send_message(uid, "↩️", reply_markup=vozvrat_kb(sess["report"]["vozvrat_counts"]))
+    else: bot.send_message(uid, "⚠️ Raqamlardan foydalaning!")
 
 @bot.message_handler(content_types=["photo"], func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "polka_photo")
 def receive_polka_photo(msg):
@@ -1016,7 +1075,7 @@ def gen_excel(reps, fn="hisobot.xlsx"):
 
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
     c = ws["A2"]
-    c.value     = (f"Sana: {today_str()}   |   Visit: {len(reps)}   |   "
+    c.value     = (f"Sana: {datetime.now(UZ_TZ).strftime('%Y-%m-%d')}   |   Visit: {len(reps)}   |   "
                    f"Agentlar: {len(agents_set)}   |   "
                    f"Sotuv: {total_sale:,} so'm   |   "
                    f"Vozvrat: {total_vozv:,} so'm   |   "
@@ -1182,7 +1241,7 @@ def my_rep(msg):
     uid,us=msg.from_user.id,get_user(msg.from_user.id); tx=msg.text; ai=sessions[uid].get("agent_filter",uid)
     if tx=="⬅️ Orqaga": sessions.pop(uid,None); return bot.send_message(uid,"↩️",reply_markup=main_kb(us["role"]))
     if tx=="📅 Bugun": reps=get_reports_by_period(today_str(),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bugun"),parse_mode="HTML")
-    elif tx=="📆 Bu oy": reps=get_reports_by_period(datetime.now().strftime("%Y-%m-01"),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bu oy"),parse_mode="HTML")
+    elif tx=="📆 Bu oy": reps=get_reports_by_period(datetime.now(UZ_TZ).strftime("%Y-%m-01"),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bu oy"),parse_mode="HTML")
     elif tx=="📤 Excel yuklash": reps=get_reports_by_period("2000-01-01",today_str(),ai); p=gen_excel(reps); bot.send_document(uid,open(p,"rb"),caption=f"📤 Hisobot Excel | {len(reps)} ta yozuv")
     elif tx=="📦 Mahsulot bo'yicha": show_product_filter(uid,"my_report_menu")
     elif tx=="🏪 Magazin bo'yicha": show_shop_filter(uid,"my_report_menu")
@@ -1201,7 +1260,7 @@ def adm_rep(msg):
     rl="admin" if is_admin(uid) else us["role"]
     if tx=="⬅️ Orqaga": sessions.pop(uid,None); return bot.send_message(uid,"↩️",reply_markup=admin_kb() if is_admin(uid) else main_kb(rl))
     if tx=="📅 Bugun": reps=get_reports_by_period(today_str(),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bugun"),parse_mode="HTML")
-    elif tx=="📆 Bu oy": reps=get_reports_by_period(datetime.now().strftime("%Y-%m-01"),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bu oy"),parse_mode="HTML")
+    elif tx=="📆 Bu oy": reps=get_reports_by_period(datetime.now(UZ_TZ).strftime("%Y-%m-01"),today_str(),ai); bot.send_message(uid,fmt_report(calc_stats(reps),"Bu oy"),parse_mode="HTML")
     elif tx=="📤 Excel yuklash": reps=get_reports_by_period("2000-01-01",today_str(),ai); p=gen_excel(reps); bot.send_document(uid,open(p,"rb"),caption=f"📤 Hisobot Excel | {len(reps)} ta yozuv")
     elif tx=="👤 Agent bo'yicha": show_agent_filter(uid,"admin_report_menu")
     elif tx=="📦 Mahsulot bo'yicha": show_product_filter(uid,"admin_report_menu")
@@ -1332,7 +1391,7 @@ def rating(msg):
 
 @bot.message_handler(func=lambda m: m.text=="💰 Sotuv statistikasi" and is_mgr(m.from_user.id))
 def sales_stats(msg):
-    uid=msg.from_user.id; rt=get_reports_by_period(today_str(),today_str()); rm=get_reports_by_period(datetime.now().strftime("%Y-%m-01"),today_str())
+    uid=msg.from_user.id; rt=get_reports_by_period(today_str(),today_str()); rm=get_reports_by_period(datetime.now(UZ_TZ).strftime("%Y-%m-01"),today_str())
     stt=calc_stats(rt); stm=calc_stats(rm); t="💰 <b>Sotuv statistikasi</b>\n━━━━━━━━━━━━━━━━━━━━\n📅 <b>Bugun:</b>\n"
     if stt and stt["total_visits"]>0:
         t+=f"  Visit: {stt['total_visits']}\n"
@@ -1368,8 +1427,19 @@ def pending_list(msg):
         bot.send_message(ADMIN_ID,f"⏳ {p['name']}\n🆔 {u_id}\n🎭 {ROLES.get(p['role'],'')}",parse_mode="HTML",reply_markup=kb)
 
 # =============================================
-# 📅 KUN YAKUNIY HTML HISOBOT (00:00 da avtomatik)
+# 📅 KUN YAKUNIY HTML HISOBOT (soat 20:00 da avtomatik)
 # =============================================
+def get_photo_base64(file_id: str) -> str:
+    """Telegram file_id dan base64 rasm olish"""
+    try:
+        file_info = bot.get_file(file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        import base64
+        return base64.b64encode(file_bytes).decode("utf-8")
+    except Exception as e:
+        print(f"⚠️ Rasm yuklab bo'lmadi: {e}")
+        return ""
+
 def gen_daily_html(target_date: str) -> str:
     d = load()
     reps = [r for r in d["reports"] if r.get("date", r.get("started","")[:10]) == target_date]
@@ -1393,9 +1463,28 @@ def gen_daily_html(target_date: str) -> str:
                      for idx,qty in v.get("vozvrat_counts",{}).items() if qty>0]
             t1 = v.get("started","")[:16]; t2 = v.get("finished","")[:16]
             tstr = f"{t1} → {t2}" if t2 else t1
+
+            # --- Rasmlar ---
+            photo_b64 = get_photo_base64(v["photo_id"]) if v.get("photo_id") else ""
+            polka_b64 = get_photo_base64(v["polka_photo_id"]) if v.get("polka_photo_id") else ""
+
+            photo_html = (
+                f'<div class="photos">'
+                + (f'<div class="photo-wrap"><div class="photo-lbl">📸 Kirish foto</div>'
+                   f'<img src="data:image/jpeg;base64,{photo_b64}" alt="foto"/></div>'
+                   if photo_b64 else '')
+                + (f'<div class="photo-wrap"><div class="photo-lbl">🛒 Polka foto</div>'
+                   f'<img src="data:image/jpeg;base64,{polka_b64}" alt="polka foto"/></div>'
+                   if polka_b64 else '')
+                + '</div>'
+            ) if (photo_b64 or polka_b64) else ''
+
             vrows += f"""<tr>
               <td class="num">{i}</td>
-              <td><b>{v.get('shop_name','—')}</b></td>
+              <td>
+                <b>{v.get('shop_name','—')}</b>
+                {photo_html}
+              </td>
               <td class="center">{tstr}</td>
               <td>{"<br>".join(prods) or "—"}</td>
               <td class="red">{"<br>".join(vozv) or "—"}</td>
@@ -1449,9 +1538,17 @@ tfoot td{{background:#f8f9fa;border-top:2px solid #dee2e6}}
 .right{{text-align:right}}.money{{text-align:right;white-space:nowrap;font-weight:600}}
 .green{{color:#27ae60}}.red{{color:#e74c3c}}
 .empty{{text-align:center;padding:40px;color:#aaa;font-size:15px}}
-@media(max-width:600px){{.summary{{flex-direction:column}}th,td{{padding:7px 8px;font-size:12px}}}}
+.photos{{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}}
+.photo-wrap{{display:flex;flex-direction:column;align-items:center;gap:4px}}
+.photo-wrap img{{width:120px;height:90px;object-fit:cover;border-radius:8px;border:2px solid #e0e0e0;box-shadow:0 1px 4px rgba(0,0,0,.12)}}
+.photo-lbl{{font-size:10px;color:#888;text-align:center}}
+@media(max-width:600px){{.summary{{flex-direction:column}}th,td{{padding:7px 8px;font-size:12px}}.photo-wrap img{{width:90px;height:68px}}}}
 </style></head><body>
-<div class="header"><h1>📊 Kunlik Hisobot</h1><p>{target_date} — Agent nazorati MEHR</p></div>
+<div class="header">
+  <h1>📊 Kunlik Hisobot</h1>
+  <p>{target_date} — Agent nazorati MEHR</p>
+  <p style="margin-top:6px;font-size:12px;opacity:.6">Yaratildi: {datetime.now(UZ_TZ).strftime('%H:%M')} (O'ZB vaqti)</p>
+</div>
 <div class="summary">
   <div class="card blue"><div class="val">{len(reps)}</div><div class="lbl">Jami visit</div></div>
   <div class="card blue"><div class="val">{len(agents)}</div><div class="lbl">Agentlar</div></div>
@@ -1464,7 +1561,7 @@ tfoot td{{background:#f8f9fa;border-top:2px solid #dee2e6}}
 
 def send_daily_report(target_date: str = None):
     if not target_date:
-        target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        target_date = (datetime.now(UZ_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
     html = gen_daily_html(target_date)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8")
     tmp.write(html); tmp.close()
@@ -1488,12 +1585,16 @@ def send_daily_report(target_date: str = None):
 
 def midnight_scheduler():
     while True:
-        now = datetime.now()
-        next_run = (now + timedelta(days=1)).replace(hour=0, minute=0, second=10, microsecond=0)
+        now = datetime.now(UZ_TZ)
+        # Bugungi soat 20:00 O'zbekiston vaqti
+        next_run = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += timedelta(days=1)
         wait = (next_run - now).total_seconds()
-        print(f"⏳ Keyingi hisobot: {next_run} ({int(wait//3600)}s {int((wait%3600)//60)}m)")
+        print(f"⏳ Keyingi hisobot (O'ZB vaqti): {next_run.strftime('%Y-%m-%d %H:%M')} ({int(wait//3600)}s {int((wait%3600)//60)}m)")
         time.sleep(wait)
-        send_daily_report()
+        # Bugungi kun hisobotini yuborish (soat 20:00 da)
+        send_daily_report(datetime.now(UZ_TZ).strftime("%Y-%m-%d"))
 
 
 # ─── Admin: qo'lda hisobot olish ───────────────────────────────────────
