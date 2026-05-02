@@ -1126,7 +1126,7 @@ def finish_report(uid):
         if is_bonus(p): continue
         s = q * p["price"]; tv += s
         vl.append(f"  • {p['name']}: {q} ta = {fmt(s)} so'm")
-    nt = ts - tv
+    nt = ts   # ← vozvrat ayirilmaydi: yangi tovar berib, eskisini olamiz
     r["total_sale"], r["total_vozv"], r["net_total"] = ts, tv, nt
     d = load(); d["reports"].append(r)
     if str(uid) in d["users"]: d["users"][str(uid)]["total_visits"] = d["users"][str(uid)].get("total_visits",0)+1
@@ -1139,15 +1139,15 @@ def finish_report(uid):
     sm = (f"━━━━━━━━━━━━━━━━━━━━\n✅ <b>Hisobot yakunlandi!</b>\n━━━━━━━━━━━━━━━━━━━━\n"
           f"🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n"
           f"📦 Sotuv:\n{st}\n💰 Sotuv jami: <b>{fmt(ts)} so'm</b>\n\n"
-          f"🔄 Vozvrat:\n{vt}\n↩️ Vozvrat jami: <b>{fmt(tv)} so'm</b>\n\n"
-          f"💵 Sof: <b>{fmt(nt)} so'm</b>"
+          f"🔄 Vozvrat (almashtirish):\n{vt}\n↩️ Vozvrat jami: <b>{fmt(tv)} so'm</b>\n\n"
+          f"💵 Jami: <b>{fmt(nt)} so'm</b>"
           f"{bonus_block}\n━━━━━━━━━━━━━━━━━━━━")
     bot.send_message(uid, sm, parse_mode="HTML", reply_markup=main_kb(get_user(uid)["role"]))
     at = (f"━━━━━━━━━━━━━━━━━━━━\n📋 <b>Yangi hisobot</b>\n━━━━━━━━━━━━━━━━━━━━\n"
           f"👤 {r['agent_name']}\n🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n"
           f"📦 Sotuv:\n{st}\n💰 Sotuv: <b>{fmt(ts)} so'm</b>\n\n"
-          f"🔄 Vozvrat:\n{vt}\n↩️ Vozvrat: <b>{fmt(tv)} so'm</b>\n\n"
-          f"💵 Sof: <b>{fmt(nt)} so'm</b>"
+          f"🔄 Vozvrat (almashtirish):\n{vt}\n↩️ Vozvrat: <b>{fmt(tv)} so'm</b>\n\n"
+          f"💵 Jami: <b>{fmt(nt)} so'm</b>"
           f"{bonus_block}\n━━━━━━━━━━━━━━━━━━━━")
     bot.send_photo(ADMIN_ID, r["photo_id"], caption=at, parse_mode="HTML")
     if r.get("polka_photo_id"):
@@ -1196,7 +1196,7 @@ def calc_stats(reps):
             if ii in vz: vz[ii]["qty"]+=q; vz[ii]["sum"]+=q*PRODUCTS[ii]["price"]
         sn=r.get("shop_name","?"); sh[sn]=sh.get(sn,{"visits":0,"sale":0,"vozv":0,"net":0})
         sh[sn]["visits"]+=1; sh[sn]["sale"]+=r.get("total_sale",0); sh[sn]["vozv"]+=r.get("total_vozv",0); sh[sn]["net"]+=r.get("net_total",0)
-    return {"total_visits":len(reps),"total_agents":len(ag),"total_sale":ts,"total_vozv":tv,"net_total":ts-tv,"agents":ag,"products":pr,"vozvrat":vz,"shops":sh,"reps":reps}
+    return {"total_visits":len(reps),"total_agents":len(ag),"total_sale":ts,"total_vozv":tv,"net_total":ts,"agents":ag,"products":pr,"vozvrat":vz,"shops":sh,"reps":reps}
 
 def fmt_report(stats, title=""):
     if not stats: return f"📭 {title}: ma'lumot yo'q."
@@ -1223,8 +1223,8 @@ def fmt_report(stats, title=""):
         for v in stats["vozvrat"].values():
             if v["qty"] > 0: t += f"  • {v['name']}: {v['qty']} ta — {fmt(v['sum'])} so'm\n"
     t += (f"\n💰 Sotuv: <b>{fmt(stats['total_sale'])} so'm</b>\n"
-          f"↩️ Vozvrat: <b>{fmt(stats['total_vozv'])} so'm</b>\n"
-          f"💵 Sof: <b>{fmt(stats['net_total'])} so'm</b>\n"
+          f"↩️ Vozvrat (almashtirish): <b>{fmt(stats['total_vozv'])} so'm</b>\n"
+          f"💵 Jami: <b>{fmt(stats['net_total'])} so'm</b>\n"
           f"━━━━━━━━━━━━━━━━━━━━")
     if stats["agents"]:
         sa = sorted(stats["agents"].items(), key=lambda x: x[1]["net"], reverse=True)
