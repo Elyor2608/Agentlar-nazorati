@@ -22,7 +22,11 @@ PRODUCTS = [
     {"name": "🧒 Detskiy sendwich", "price": 5000},
     {"name": "🍗 Tovuqli sendwich", "price": 12000},
     {"name": "🍔 Burger",           "price": 15000},
+    {"name": "🎁 Sendwich Bonus",   "price": 0,  "bonus": True},
 ]
+
+def is_bonus(p):
+    return p.get("bonus", False)
 
 ROLES = {
     "admin":       "👑 Admin",
@@ -231,9 +235,10 @@ def qty_numpad_vozv_kb():
     return kb
 
 def vozvrat_kb(counts):
-    """Vozvrat uchun qizil belgili mahsulotlar paneli"""
+    """Vozvrat uchun qizil belgili mahsulotlar paneli — bonus ko'rinmaydi"""
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for i, p in enumerate(PRODUCTS):
+        if is_bonus(p): continue   # 🎁 Bonus vozvrat bo'lmaydi
         cnt = counts.get(str(i), 0)
         label = f"🔴 {p['name']} [{cnt} ta]" if cnt > 0 else f"🔴 {p['name']}"
         kb.add(label)
@@ -1101,19 +1106,43 @@ def auto_save_client_from_report(r):
 def finish_report(uid):
     sess = sessions.get(uid); r = sess["report"]; r["finished"] = now_str()
     sl, ts = [], 0
-    for i, q in r.get("product_counts",{}).items(): s=q*PRODUCTS[int(i)]["price"]; ts+=s; sl.append(f"  • {PRODUCTS[int(i)]['name']}: {q} ta = {fmt(s)} so'm")
+    bonus_lines = []
+    for i, q in r.get("product_counts",{}).items():
+        p = PRODUCTS[int(i)]
+        if is_bonus(p):
+            bonus_lines.append(f"  • {p['name']}: {q} ta (🆓 bepul)")
+        else:
+            s = q * p["price"]; ts += s
+            sl.append(f"  • {p['name']}: {q} ta = {fmt(s)} so'm")
     vl, tv = [], 0
-    for i, q in r.get("vozvrat_counts",{}).items(): s=q*PRODUCTS[int(i)]["price"]; tv+=s; vl.append(f"  • {PRODUCTS[int(i)]['name']}: {q} ta = {fmt(s)} so'm")
-    nt = ts-tv; r["total_sale"], r["total_vozv"], r["net_total"] = ts, tv, nt
-    d=load(); d["reports"].append(r)
+    for i, q in r.get("vozvrat_counts",{}).items():
+        p = PRODUCTS[int(i)]
+        if is_bonus(p): continue
+        s = q * p["price"]; tv += s
+        vl.append(f"  • {p['name']}: {q} ta = {fmt(s)} so'm")
+    nt = ts - tv
+    r["total_sale"], r["total_vozv"], r["net_total"] = ts, tv, nt
+    d = load(); d["reports"].append(r)
     if str(uid) in d["users"]: d["users"][str(uid)]["total_visits"] = d["users"][str(uid)].get("total_visits",0)+1
     save(d)
-    # ✅ Do'konni avtomatik mijozlar ro'yxatiga qo'shish
     auto_save_client_from_report(r)
-    st="\n".join(sl) or "  —"; vt="\n".join(vl) or "  —"
-    sm = f"━━━━━━━━━━━━━━━━━━━━\n✅ <b>Hisobot yakunlandi!</b>\n━━━━━━━━━━━━━━━━━━━━\n🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n📦 Sotuv:\n{st}\n💰 Sotuv jami: <b>{fmt(ts)} so'm</b>\n\n🔄 Vozvrat:\n{vt}\n↩️ Vozvrat jami: <b>{fmt(tv)} so'm</b>\n\n💵 Sof: <b>{fmt(nt)} so'm</b>\n━━━━━━━━━━━━━━━━━━━━"
+    st = "\n".join(sl) or "  —"
+    vt = "\n".join(vl) or "  —"
+    bt = "\n".join(bonus_lines)
+    bonus_block = f"\n\n🎁 <b>Bonus:</b>\n{bt}" if bonus_lines else ""
+    sm = (f"━━━━━━━━━━━━━━━━━━━━\n✅ <b>Hisobot yakunlandi!</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+          f"🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n"
+          f"📦 Sotuv:\n{st}\n💰 Sotuv jami: <b>{fmt(ts)} so'm</b>\n\n"
+          f"🔄 Vozvrat:\n{vt}\n↩️ Vozvrat jami: <b>{fmt(tv)} so'm</b>\n\n"
+          f"💵 Sof: <b>{fmt(nt)} so'm</b>"
+          f"{bonus_block}\n━━━━━━━━━━━━━━━━━━━━")
     bot.send_message(uid, sm, parse_mode="HTML", reply_markup=main_kb(get_user(uid)["role"]))
-    at = f"━━━━━━━━━━━━━━━━━━━━\n📋 <b>Yangi hisobot</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 {r['agent_name']}\n🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n📦 Sotuv:\n{st}\n💰 Sotuv: <b>{fmt(ts)} so'm</b>\n\n🔄 Vozvrat:\n{vt}\n↩️ Vozvrat: <b>{fmt(tv)} so'm</b>\n\n💵 Sof: <b>{fmt(nt)} so'm</b>\n━━━━━━━━━━━━━━━━━━━━"
+    at = (f"━━━━━━━━━━━━━━━━━━━━\n📋 <b>Yangi hisobot</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+          f"👤 {r['agent_name']}\n🏪 {r.get('shop_name','')}\n🕐 {r['started']} → {r['finished']}\n\n"
+          f"📦 Sotuv:\n{st}\n💰 Sotuv: <b>{fmt(ts)} so'm</b>\n\n"
+          f"🔄 Vozvrat:\n{vt}\n↩️ Vozvrat: <b>{fmt(tv)} so'm</b>\n\n"
+          f"💵 Sof: <b>{fmt(nt)} so'm</b>"
+          f"{bonus_block}\n━━━━━━━━━━━━━━━━━━━━")
     bot.send_photo(ADMIN_ID, r["photo_id"], caption=at, parse_mode="HTML")
     if r.get("polka_photo_id"):
         bot.send_photo(ADMIN_ID, r["polka_photo_id"], caption="🛒 Polka foto")
@@ -1145,35 +1174,60 @@ def get_reports_by_period(sd, ed, aid=None, pi=None, sn=None):
 
 def calc_stats(reps):
     if not reps: return None
-    ts=tv=0; ag={}; pr={i:{"name":p["name"],"price":p["price"],"qty":0,"sum":0} for i,p in enumerate(PRODUCTS)}
-    vz={i:{"name":p["name"],"qty":0,"sum":0} for i,p in enumerate(PRODUCTS)}; sh={}
+    ts=tv=0; ag={}
+    pr={i:{"name":p["name"],"price":p["price"],"qty":0,"sum":0,"bonus":p.get("bonus",False)} for i,p in enumerate(PRODUCTS)}
+    vz={i:{"name":p["name"],"qty":0,"sum":0} for i,p in enumerate(PRODUCTS) if not is_bonus(p)}
+    sh={}
     for r in reps:
         ts+=r.get("total_sale",0); tv+=r.get("total_vozv",0)
-        an=r.get("agent_name","?"); ag[an]=ag.get(an,{"visits":0,"sale":0,"vozv":0,"net":0}); ag[an]["visits"]+=1; ag[an]["sale"]+=r.get("total_sale",0); ag[an]["vozv"]+=r.get("total_vozv",0); ag[an]["net"]+=r.get("net_total",0)
-        for i,q in r.get("product_counts",{}).items(): ii=int(i); pr[ii]["qty"]+=q; pr[ii]["sum"]+=q*pr[ii]["price"]
-        for i,q in r.get("vozvrat_counts",{}).items(): ii=int(i); vz[ii]["qty"]+=q; vz[ii]["sum"]+=q*PRODUCTS[ii]["price"]
-        sn=r.get("shop_name","?"); sh[sn]=sh.get(sn,{"visits":0,"sale":0,"vozv":0,"net":0}); sh[sn]["visits"]+=1; sh[sn]["sale"]+=r.get("total_sale",0); sh[sn]["vozv"]+=r.get("total_vozv",0); sh[sn]["net"]+=r.get("net_total",0)
+        an=r.get("agent_name","?"); ag[an]=ag.get(an,{"visits":0,"sale":0,"vozv":0,"net":0})
+        ag[an]["visits"]+=1; ag[an]["sale"]+=r.get("total_sale",0); ag[an]["vozv"]+=r.get("total_vozv",0); ag[an]["net"]+=r.get("net_total",0)
+        for i,q in r.get("product_counts",{}).items():
+            ii=int(i); pr[ii]["qty"]+=q
+            if not pr[ii]["bonus"]: pr[ii]["sum"]+=q*pr[ii]["price"]
+        for i,q in r.get("vozvrat_counts",{}).items():
+            ii=int(i)
+            if ii in vz: vz[ii]["qty"]+=q; vz[ii]["sum"]+=q*PRODUCTS[ii]["price"]
+        sn=r.get("shop_name","?"); sh[sn]=sh.get(sn,{"visits":0,"sale":0,"vozv":0,"net":0})
+        sh[sn]["visits"]+=1; sh[sn]["sale"]+=r.get("total_sale",0); sh[sn]["vozv"]+=r.get("total_vozv",0); sh[sn]["net"]+=r.get("net_total",0)
     return {"total_visits":len(reps),"total_agents":len(ag),"total_sale":ts,"total_vozv":tv,"net_total":ts-tv,"agents":ag,"products":pr,"vozvrat":vz,"shops":sh,"reps":reps}
 
 def fmt_report(stats, title=""):
     if not stats: return f"📭 {title}: ma'lumot yo'q."
-    t=f"━━━━━━━━━━━━━━━━━━━━\n📊 <b>{title}</b>\n━━━━━━━━━━━━━━━━━━━━\n👥 Agentlar: <b>{stats['total_agents']}</b>\n🏪 Visit: <b>{stats['total_visits']}</b>\n🏬 Magazin: <b>{len(stats['shops'])}</b>\n\n📦 <b>Mahsulotlar:</b>\n"
+    t = (f"━━━━━━━━━━━━━━━━━━━━\n📊 <b>{title}</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+         f"👥 Agentlar: <b>{stats['total_agents']}</b>\n"
+         f"🏪 Visit: <b>{stats['total_visits']}</b>\n"
+         f"🏬 Magazin: <b>{len(stats['shops'])}</b>\n\n"
+         f"📦 <b>Mahsulotlar:</b>\n")
+    paid_shown = False
     for p in stats["products"].values():
-        if p["qty"]>0: t+=f"  • {p['name']}: {p['qty']} ta — {fmt(p['sum'])} so'm\n"
-    if all(p["qty"]==0 for p in stats["products"].values()): t+="  —\n"
-    if any(v["qty"]>0 for v in stats["vozvrat"].values()):
-        t+="\n🔄 <b>Vozvrat:</b>\n"
+        if p.get("bonus"): continue
+        if p["qty"] > 0:
+            t += f"  • {p['name']}: {p['qty']} ta — {fmt(p['sum'])} so'm\n"
+            paid_shown = True
+    if not paid_shown: t += "  —\n"
+    # Bonus mahsulotlar
+    bonus_lines = [p for p in stats["products"].values() if p.get("bonus") and p["qty"] > 0]
+    if bonus_lines:
+        t += "\n🎁 <b>Bonus (bepul):</b>\n"
+        for p in bonus_lines:
+            t += f"  • {p['name']}: {p['qty']} ta\n"
+    if any(v["qty"] > 0 for v in stats["vozvrat"].values()):
+        t += "\n🔄 <b>Vozvrat:</b>\n"
         for v in stats["vozvrat"].values():
-            if v["qty"]>0: t+=f"  • {v['name']}: {v['qty']} ta — {fmt(v['sum'])} so'm\n"
-    t+=f"\n💰 Sotuv: <b>{fmt(stats['total_sale'])} so'm</b>\n↩️ Vozvrat: <b>{fmt(stats['total_vozv'])} so'm</b>\n💵 Sof: <b>{fmt(stats['net_total'])} so'm</b>\n━━━━━━━━━━━━━━━━━━━━"
+            if v["qty"] > 0: t += f"  • {v['name']}: {v['qty']} ta — {fmt(v['sum'])} so'm\n"
+    t += (f"\n💰 Sotuv: <b>{fmt(stats['total_sale'])} so'm</b>\n"
+          f"↩️ Vozvrat: <b>{fmt(stats['total_vozv'])} so'm</b>\n"
+          f"💵 Sof: <b>{fmt(stats['net_total'])} so'm</b>\n"
+          f"━━━━━━━━━━━━━━━━━━━━")
     if stats["agents"]:
-        sa=sorted(stats["agents"].items(),key=lambda x:x[1]["net"],reverse=True)
-        t+="\n\n👤 <b>TOP Agentlar:</b>\n"
-        for i,(n,a) in enumerate(sa[:10]): t+=f"  {i+1}. {n} — {a['visits']} Visit, {fmt(a['net'])} so'm\n"
+        sa = sorted(stats["agents"].items(), key=lambda x: x[1]["net"], reverse=True)
+        t += "\n\n👤 <b>TOP Agentlar:</b>\n"
+        for i, (n, a) in enumerate(sa[:10]): t += f"  {i+1}. {n} — {a['visits']} Visit, {fmt(a['net'])} so'm\n"
     if stats["shops"]:
-        ss=sorted(stats["shops"].items(),key=lambda x:x[1]["net"],reverse=True)
-        t+="\n🏪 <b>TOP Magazinlar:</b>\n"
-        for i,(n,s) in enumerate(ss[:10]): t+=f"  {i+1}. {n} — {s['visits']} Visit, {fmt(s['net'])} so'm\n"
+        ss = sorted(stats["shops"].items(), key=lambda x: x[1]["net"], reverse=True)
+        t += "\n🏪 <b>TOP Magazinlar:</b>\n"
+        for i, (n, s) in enumerate(ss[:10]): t += f"  {i+1}. {n} — {s['visits']} Visit, {fmt(s['net'])} so'm\n"
     return t
 
 def gen_excel(reps, fn="hisobot.xlsx"):
@@ -1214,7 +1268,7 @@ def gen_excel(reps, fn="hisobot.xlsx"):
     ws.title = "Batafsil hisobot"
     ws.sheet_view.showGridLines = False
 
-    last_col = 5 + len(PRODUCTS)*2 + 3
+    last_col = 5 + sum(1 if is_bonus(p) else 2 for p in PRODUCTS) + 3
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     c = ws["A1"]
@@ -1246,16 +1300,24 @@ def gen_excel(reps, fn="hisobot.xlsx"):
     base_h = ["#", "Sana", "Vaqt", "Agent", "Mijoz / Do'kon"]
     prod_h = []
     for p in PRODUCTS:
-        pn = p['name'].replace("🥪","").replace("🧒","").replace("🍗","").replace("🍔","").strip()
-        prod_h += [f"{pn}\n(dona)", f"{pn}\n(so'm)"]
+        pn = p['name'].replace("🥪","").replace("🧒","").replace("🍗","").replace("🍔","").replace("🎁","").strip()
+        if is_bonus(p):
+            prod_h += [f"{pn}\n(dona)"]   # bonus: faqat soni, narxi yo'q
+        else:
+            prod_h += [f"{pn}\n(dona)", f"{pn}\n(so'm)"]
     sum_h  = ["Sotuv\n(so'm)", "Vozvrat\n(so'm)", "SOF\n(so'm)"]
     all_h  = base_h + prod_h + sum_h
+
+    # last_col qayta hisoblaymiz
+    last_col = len(all_h)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
 
     for col, hdr in enumerate(all_h, 1):
         bg = C_HEAD2 if col > len(base_h)+len(prod_h) else C_HEAD
         h(ws, ROW_H, col, hdr, bg=bg)
     ws.row_dimensions[ROW_H].height = 42
 
+    C_BONUS = "E2EFDA"  # bonus ustun rangi — yashil
     for idx, r in enumerate(reps, 1):
         row    = ROW_H + idx
         bg_row = C_ALT if idx % 2 == 0 else None
@@ -1268,9 +1330,13 @@ def gen_excel(reps, fn="hisobot.xlsx"):
         col = 6
         for i, p in enumerate(PRODUCTS):
             q  = r.get("product_counts",{}).get(str(i), 0)
-            bg = C_BLUE if q > 0 else bg_row
-            d(ws, row, col,   q,            bg=bg);        col += 1
-            d(ws, row, col,   q*p["price"], SOM, bg=bg);  col += 1
+            if is_bonus(p):
+                bg = C_BONUS if q > 0 else bg_row
+                d(ws, row, col, q, bg=bg); col += 1   # faqat 1 ustun
+            else:
+                bg = C_BLUE if q > 0 else bg_row
+                d(ws, row, col,   q,            bg=bg);        col += 1
+                d(ws, row, col,   q*p["price"], SOM, bg=bg);  col += 1
         d(ws, row, col, r.get("total_sale",0), SOM, bg=C_BLUE if r.get("total_sale",0)>0 else bg_row); col+=1
         d(ws, row, col, r.get("total_vozv",0), SOM, bg=C_RED  if r.get("total_vozv",0)>0 else bg_row); col+=1
         d(ws, row, col, r.get("net_total", 0), SOM, bg=C_GREEN, bold=True)
@@ -1282,15 +1348,32 @@ def gen_excel(reps, fn="hisobot.xlsx"):
         for col, val in enumerate(["","","","JAMI", f"{len(reps)} visit"], 1):
             h(ws, tr, col, val, bg=C_TOTAL, fg=C_DARK)
         col = 6; ds = ROW_H+1; de = ROW_H+len(reps)
-        for i in range(len(PRODUCTS)*2):
+        # Bonus bo'lmagan mahsulotlar uchun 2 ustun (dona + so'm), bonus uchun 1 ustun
+        col_count = sum(1 if is_bonus(p) else 2 for p in PRODUCTS)
+        for i in range(col_count):
             cl = get_column_letter(col+i)
             c  = ws.cell(tr, col+i, f"=SUM({cl}{ds}:{cl}{de})")
             c.font = Font(bold=True, name="Calibri", size=10, color=C_DARK)
             c.fill = PatternFill("solid", start_color=C_TOTAL)
             c.alignment = Alignment(horizontal="center", vertical="center")
             c.border = brd
-            if i%2==1: c.number_format = SOM
-        col += len(PRODUCTS)*2
+            # so'm ustunini formatlash (har 2-ustun, bonus dan keyin ham to'g'ri tartib)
+            # Hisoblash: non-bonus products'da 2nd column (i%2==1), bonus'da faqat 1 ustun
+            is_som_col = False
+            cur_col = 0
+            for j, p2 in enumerate(PRODUCTS):
+                if is_bonus(p2):
+                    if cur_col == i: break
+                    cur_col += 1
+                else:
+                    if cur_col == i: break
+                    cur_col += 1
+                    if cur_col == i+1:
+                        is_som_col = True
+                        break
+                    cur_col += 1
+            if is_som_col: c.number_format = SOM
+        col += col_count
         for offset, bgc in enumerate([C_BLUE, C_RED, C_GREEN]):
             cl = get_column_letter(col+offset)
             c  = ws.cell(tr, col+offset, f"=SUM({cl}{ds}:{cl}{de})")
@@ -1300,7 +1383,9 @@ def gen_excel(reps, fn="hisobot.xlsx"):
             c.border = brd; c.number_format = SOM
 
     widths = [4, 12, 8, 20, 28]
-    for _ in PRODUCTS: widths += [8, 16]
+    for p in PRODUCTS:
+        if is_bonus(p): widths += [8]        # bonus: 1 ustun
+        else:           widths += [8, 16]    # oddiy: 2 ustun
     widths += [16, 16, 18]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
