@@ -40,6 +40,7 @@ DATA_FILE    = "bot_data.json"
 SHOPS_FILE   = "shops.json"
 CLIENTS_FILE = "clients.json"
 sessions     = {}
+_save_lock   = threading.Lock()   # ← thread-safe saqlash uchun
 
 # =============================================
 # 🗄 MA'LUMOTLAR
@@ -51,8 +52,9 @@ def load():
     return {"users": {}, "reports": [], "pending": {}}
 
 def save(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with _save_lock:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_shops():
     if os.path.exists(SHOPS_FILE):
@@ -946,7 +948,11 @@ def receive_photo(msg):
     if int(time.time()) - msg.date > 120: return bot.send_message(uid, "❌ Eski foto!")
     sess["report"]["photo_id"], sess["report"]["photo_time"] = msg.photo[-1].file_id, now_str()
     sess["step"], sess["report"]["product_counts"] = "products", {}
-    pl = "\n".join(f"  {i+1}. {p['name']} — {fmt(p['price'])} so'm" for i, p in enumerate(PRODUCTS))
+    pl = "\n".join(
+        f"  {i+1}. {p['name']} — 🆓 Bepul" if is_bonus(p)
+        else f"  {i+1}. {p['name']} — {fmt(p['price'])} so'm"
+        for i, p in enumerate(PRODUCTS)
+    )
     bot.send_message(uid, f"✅ Foto qabul qilindi!\n\n📦 <b>3-qadam: Mahsulotlar</b>\n\n{pl}", parse_mode="HTML", reply_markup=products_kb({}))
 
 @bot.message_handler(func=lambda m: sessions.get(m.from_user.id, {}).get("step") == "products")
@@ -979,7 +985,7 @@ def select_product(msg):
             cur_qty = sess["report"]["product_counts"].get(str(i), 0)
             msg_text = (
                 f"📦 <b>{p['name']}</b>\n"
-                f"Narxi: <b>{fmt(p['price'])} so'm</b>\n"
+                + (f"🆓 Bepul mahsulot\n" if is_bonus(p) else f"Narxi: <b>{fmt(p['price'])} so'm</b>\n")
                 + (f"Joriy soni: <b>{cur_qty} ta</b>\n" if cur_qty > 0 else "")
                 + "\nYangi soni:"
             )
@@ -995,7 +1001,7 @@ def receive_qty_sale(msg):
     if text.isdigit():
         cur = sess.get("qty_input","") + text; cur = "0" if cur.lstrip("0")=="" else str(int(cur))
         sess["qty_input"] = cur; qty = int(cur)
-        bot.send_message(uid, f"📦 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta" + (f"\nJami: <b>{fmt(qty*p['price'])} so'm</b>" if qty>0 else ""), parse_mode="HTML", reply_markup=qty_numpad_kb())
+        bot.send_message(uid, f"📦 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta" + (f"\nJami: <b>{fmt(qty*p['price'])} so'm</b>" if qty>0 and not is_bonus(p) else ""), parse_mode="HTML", reply_markup=qty_numpad_kb())
     elif text == "🔙":
         cur = sess.get("qty_input",""); cur = cur[:-1] if len(cur)>1 else "0"; sess["qty_input"] = cur
         bot.send_message(uid, f"📦 <b>{p['name']}</b>\nSoni: <b>{cur}</b> ta", parse_mode="HTML", reply_markup=qty_numpad_kb())
@@ -1701,8 +1707,11 @@ def gen_daily_html(target_date: str) -> str:
         a_net  = sum(v.get("net_total", 0) for v in visits)
         vrows = ""
         for i, v in enumerate(visits, 1):
-            prods = [f"{PRODUCTS[int(idx)]['name']}: {qty} ta ({fmt(qty*PRODUCTS[int(idx)]['price'])} so'm)"
-                     for idx,qty in v.get("product_counts",{}).items() if qty>0]
+            prods = [
+                f"{PRODUCTS[int(idx)]['name']}: {qty} ta 🆓 bepul" if is_bonus(PRODUCTS[int(idx)])
+                else f"{PRODUCTS[int(idx)]['name']}: {qty} ta ({fmt(qty*PRODUCTS[int(idx)]['price'])} so'm)"
+                for idx, qty in v.get("product_counts",{}).items() if qty > 0
+            ]
             vozv  = [f"{PRODUCTS[int(idx)]['name']}: {qty} ta"
                      for idx,qty in v.get("vozvrat_counts",{}).items() if qty>0]
             t1 = v.get("started","")[:16]; t2 = v.get("finished","")[:16]
@@ -1880,4 +1889,11 @@ print("✅ Bot ishga tushdi...")
 sched_thread = threading.Thread(target=midnight_scheduler, daemon=True)
 sched_thread.start()
 
-bot.infinity_polling()
+# 🔄 Bot hech qachon qotmasligi uchun while True wrapper
+while True:
+    try:
+        print("🤖 Polling boshlandi...")
+        bot.infinity_polling(timeout=60, long_polling_timeout=30)
+    except Exception as e:
+        print(f"⚠️ Polling xatosi: {e} — 5 soniyadan keyin qayta uriniladi...")
+        time.sleep(5)
